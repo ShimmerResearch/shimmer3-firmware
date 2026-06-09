@@ -104,6 +104,7 @@ void triggerShimmerErrorState(void);
 
 /* should be 0 */
 #define IS_SUPPORTED_TCXO 0
+#define IS_FACTORY_TEST_BASES 0
 
 uint8_t watchDogWasOnDuringBtStart;
 
@@ -126,7 +127,11 @@ void main(void)
 
   while (1)
   {
+#if IS_FACTORY_TEST_BASES
+    platform_sleepWhenNoTask();
+#else
     ShimTask_manage();
+#endif
   }
 }
 
