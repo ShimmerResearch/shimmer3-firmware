@@ -319,14 +319,34 @@ void SetBattDma(void)
 
 void manageReadBatt(uint8_t isBlockingRead)
 {
-  SetBattDma();
-  //Produces spikes in PPG data when only GSR enabled & aaccel, vbatt are off.
-  __bis_SR_register(LPM3_bits + GIE); //ACLK remains active
+  //Shimmer3 reads the battery synchronously; the blocking-read hint is unused here
+  //(the shared signature is kept for Shimmer3R, which passes it to S4_ADC_readBatt).
+  (void) isBlockingRead;
 
-  //TODO check if this is really needed
-  ShimSens_configureChannels();
-
-  saveBatteryVoltageAndUpdateStatus();
+  /* ADC sensor data is prioritised over an up-to-date battery value - only take
+   * a fresh measurement (which borrows the shared ADC12/DMA0) when it cannot
+   * disturb the ADC sensor stream. See LogAndStream_getBattReadAction(). */
+  switch (LogAndStream_getBattReadAction())
+  {
+    case BATT_READ_USE_STREAM:
+      //Use the VBatt sample from the last completed sensing buffer (not the
+      //write index, which the DMA may be filling).
+      *(uint16_t *) battVal
+          = *(uint16_t *) &ShimSens_getDataBuffAtPrevWrIdx()[sensing.ptr.batteryAnalog];
+      saveBatteryVoltageAndUpdateStatus();
+      break;
+    case BATT_READ_REPEAT_LAST:
+      /* Another ADC channel is being sensed on the shared ADC. A read would
+       * disturb the sensor data, so keep the last measured value. */
+      break;
+    case BATT_READ_NEW:
+    default:
+      SetBattDma();
+      __bis_SR_register(LPM3_bits + GIE); //ACLK remains active
+      ShimSens_configureChannels();
+      saveBatteryVoltageAndUpdateStatus();
+      break;
+  }
 }
 
 void saveBatteryVoltageAndUpdateStatus(void)
