@@ -319,6 +319,10 @@ void SetBattDma(void)
 
 void manageReadBatt(uint8_t isBlockingRead)
 {
+  //Shimmer3 reads the battery synchronously; the blocking-read hint is unused here
+  //(the shared signature is kept for Shimmer3R, which passes it to S4_ADC_readBatt).
+  (void) isBlockingRead;
+
   /* ADC sensor data is prioritised over an up-to-date battery value - only take
    * a fresh measurement (which borrows the shared ADC12/DMA0) when it cannot
    * disturb the ADC sensor stream. See LogAndStream_getBattReadAction(). */
