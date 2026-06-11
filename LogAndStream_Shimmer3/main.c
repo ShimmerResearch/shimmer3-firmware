@@ -738,9 +738,9 @@ uint8_t checkIfBattReadNeeded(void)
   if ((batt_td > ShimBatt_getBatteryIntervalTicks()))
   {
     battLastTs64 = batt_my_local_time_64;
-    /* Read the battery periodically even while sensing - manageReadBatt() applies
-     * the ADC-priority policy (LogAndStream_getBattReadAction), so the read never
-     * disturbs the ADC sensor stream. */
+    /* Read the battery periodically even while sensing - manageReadBatt()
+     * applies the ADC-priority policy (LogAndStream_getBattReadAction), so the
+     * read never disturbs the ADC sensor stream. */
     if (ShimTask_set(TASK_BATT_READ))
     {
       return 1;

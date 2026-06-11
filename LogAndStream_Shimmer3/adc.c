@@ -319,9 +319,9 @@ void SetBattDma(void)
 
 void manageReadBatt(uint8_t isBlockingRead)
 {
-  /* ADC sensor data is prioritised over an up-to-date battery value - only take a
-   * fresh measurement (which borrows the shared ADC12/DMA0) when it cannot disturb
-   * the ADC sensor stream. See LogAndStream_getBattReadAction(). */
+  /* ADC sensor data is prioritised over an up-to-date battery value - only take
+   * a fresh measurement (which borrows the shared ADC12/DMA0) when it cannot
+   * disturb the ADC sensor stream. See LogAndStream_getBattReadAction(). */
   switch (LogAndStream_getBattReadAction())
   {
     case BATT_READ_USE_STREAM:
