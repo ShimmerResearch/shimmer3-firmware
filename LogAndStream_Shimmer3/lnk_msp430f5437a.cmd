@@ -133,6 +133,11 @@ MEMORY
 /* SPECIFY THE SECTIONS ALLOCATION INTO MEMORY                              */
 /****************************************************************************/
 
+/* Retain the firmware version marker: TI --unused_section_elimination        */
+/* otherwise drops .version because nothing references fw_version_struct       */
+/* (the GNU-linker targets keep it via KEEP() in their linker scripts).        */
+--retain="*(.version)"
+
 SECTIONS
 {
     .bss        : {} > RAM                /* GLOBAL & STATIC VARS              */
@@ -144,6 +149,7 @@ SECTIONS
     .text:_isr  : {} > FLASH              /* ISR CODE SPACE                    */
     .cinit      : {} > FLASH | FLASH2     /* INITIALIZATION TABLES             */
     .const      : {} > FLASH | FLASH2     /* CONSTANT DATA                     */
+    .version    : {} > FLASH              /* FW VERSION TRACEABILITY MARKER    */
     .cio        : {} > RAM                /* C I/O BUFFER                      */
 
     .pinit      : {} > FLASH              /* C++ CONSTRUCTOR TABLES            */
