@@ -133,6 +133,11 @@ MEMORY
 /* SPECIFY THE SECTIONS ALLOCATION INTO MEMORY                              */
 /****************************************************************************/
 
+/* Retain the firmware version marker: TI --unused_section_elimination        */
+/* otherwise drops .version because nothing references fw_version_struct       */
+/* (the GNU-linker targets keep it via KEEP() in their linker scripts).        */
+--retain="*(.version)"
+
 SECTIONS
 {
     .bss        : {} > RAM                /* GLOBAL & STATIC VARS              */
