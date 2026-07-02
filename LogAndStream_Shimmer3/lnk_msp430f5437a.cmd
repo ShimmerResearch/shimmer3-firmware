@@ -144,6 +144,7 @@ SECTIONS
     .text:_isr  : {} > FLASH              /* ISR CODE SPACE                    */
     .cinit      : {} > FLASH | FLASH2     /* INITIALIZATION TABLES             */
     .const      : {} > FLASH | FLASH2     /* CONSTANT DATA                     */
+    .version    : {} > FLASH              /* FW VERSION TRACEABILITY MARKER    */
     .cio        : {} > RAM                /* C I/O BUFFER                      */
 
     .pinit      : {} > FLASH              /* C++ CONSTRUCTOR TABLES            */

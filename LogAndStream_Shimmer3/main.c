@@ -79,6 +79,13 @@
 #include "shimmer_driver_include.h"
 #include "version.h"
 
+/* Firmware version marker embedded in the .version linker section for
+ * traceability. Defined here (rather than in the auto-generated version.h) so
+ * version.h can be included by multiple translation units without duplicating
+ * this object across the .version section. */
+__attribute__((section(".version"), used)) const firmware_version_t fw_version_struct
+    = { .major = FW_VERSION_MAJOR, .minor = FW_VERSION_MINOR, .patch = FW_VERSION_PATCH };
+
 void Init(void);
 void InitialiseBt(void);
 void InitialiseBtAfterBoot(void);
