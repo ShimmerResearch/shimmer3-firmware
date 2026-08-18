@@ -279,7 +279,6 @@ void InitialiseBt(void)
   BT_setGetVersion(1);
 
   BT_setUpdateBaudDuringBoot(1);
-  //BT_useSpecificAdvertisingName(1U);
 
   uint8_t initialBaudRate = BAUD_115200;
   /* Use previous baud rate from the EEPROM if it is present */
