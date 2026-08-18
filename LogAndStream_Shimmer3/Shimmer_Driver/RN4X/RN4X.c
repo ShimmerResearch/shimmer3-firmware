@@ -1148,8 +1148,7 @@ void runSetCommands(void)
           const char *blePrefix = ShimEeprom_getBrandBle();
           uint8_t bleNameLen = 0;
 
-          while (bleNameLen < BLE_ADV_NAME_PREFIX_MAX_CHARS
-              && blePrefix[bleNameLen] != '\0')
+          while (bleNameLen < BLE_ADV_NAME_PREFIX_MAX_CHARS && blePrefix[bleNameLen] != '\0')
           {
             bleNamePlain[bleNameLen] = blePrefix[bleNameLen];
             bleNameLen++;

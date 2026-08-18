@@ -344,10 +344,10 @@ void BT_setDiscoverable(uint8_t disc);
 void BT_setEncryption(uint8_t enc);
 void BT_setAuthentication(uint8_t auth);
 void BT_setAdvertisingName(const char *name); //max 16 chars
-void BT_setPIN(char *name);                  //max 16 chars
-void BT_setServiceClass(char *serviceClass); //max 4 chars (hex word)
-void BT_setServiceName(char *name);          //max 16 chars
-void BT_setDeviceClass(char *deviceClass);   //max 4 chars (hex word)
+void BT_setPIN(char *name);                   //max 16 chars
+void BT_setServiceClass(char *serviceClass);  //max 4 chars (hex word)
+void BT_setServiceName(char *name);           //max 16 chars
+void BT_setDeviceClass(char *deviceClass);    //max 4 chars (hex word)
 void BT_rn4xDisableRemoteConfig(uint8_t disableRemoteConfig);
 void BT_setUpdateBaudDuringBoot(uint8_t val);
 
