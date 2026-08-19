@@ -20,7 +20,8 @@
 /********** Defines created when testing Bluetooth driver - End ***********/
 
 /* Advertising name prefixes come from the EEPROM brand record (see
- * EEPROM/shimmer_eeprom.h). The record is seeded with BRAND_DEFAULT_*
+ * log-and-stream-common/EEPROM/shimmer_eeprom.h — the log-and-stream-common
+ * submodule). The record is seeded with BRAND_DEFAULT_*
  * compile-time defaults when blank/invalid, so stock units advertise as
  * "Shimmer3-XXXX" (Classic) and "S3BLE-XXXX" (BLE) exactly as before. */
 
