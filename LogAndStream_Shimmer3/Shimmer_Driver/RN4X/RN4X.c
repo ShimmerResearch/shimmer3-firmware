@@ -2449,10 +2449,12 @@ void setBleDeviceInformation(char *daughtCardIdStrPtr,
     uint8_t fwVerRelNew)
 {
   daughtCardIdStrPtrForBle = daughtCardIdStrPtr;
-  /* Manufacturer from the EEPROM brand record (stock default "Shimmer"),
-   * truncated to fit the module's field */
+  /* BLE Device Information Service manufacturer, from the EEPROM brand record
+   * and truncated to fit the module's field. The stock record holds
+   * "Shimmer Research Ltd.", which truncates to "Shimmer" - exactly the value
+   * this field carried before the record existed. */
   snprintf(rn4678BleManufacturer, sizeof(rn4678BleManufacturer), "%s",
-      ShimEeprom_getBrandUsb());
+      ShimEeprom_getBrandUsbManufacturer());
   /* Assumes major = 1 char and minor = 2 char*/
   sprintf(rn4678BleSwRevision, "%d.%d\0", fwVerMajorNew, fwVerMinorNew);
 }
