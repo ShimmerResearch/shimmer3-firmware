@@ -83,8 +83,9 @@ char expectedCommandResponse[62U], advertisingName[17], newAutoMaster[13],
     inquiryScanWindow[5], pagingTime[5], btMode[2], rn4678FastMode[5],
     rn4678BleConnectionParameters[20], rn4678BleSwRevision[5],
     rn4678BleManufacturer[8], rn4xRemoteConfigurationTimer[4],
-    bleCompleteLocalName[21];
-char commandbuf[32];
+    /* Holds hex-encoded "<prefix>-XXXX": (8+1+4)*2 hex chars + NUL */
+    bleCompleteLocalName[28];
+char commandbuf[40];
 
 rn4678TxPower_et rn4678TxPower;
 rn42TxPowerPreAug2012_et rn42TxPowerPreAug2012;
@@ -94,7 +95,7 @@ BT_SET_COMMAND_STAGES_t bt_setcommands_step;
 uint8_t command_received, bt_setcommands_start;
 uint8_t bt_runmastercommands_step, bt_runmastercommands_start;
 uint8_t bt_getmac_step, bt_getmac_start;
-uint8_t bt_setbaudrate_step, useSpecificAdvertisingName;
+uint8_t bt_setbaudrate_step;
 uint8_t charsReceived;
 btOperatingMode radioMode;
 
@@ -580,7 +581,6 @@ void runSetCommands(void)
       if (doesBtConfigNeedUpdating)
       {
         doesBtConfigNeedUpdating = 0;
-        BT_useSpecificAdvertisingName(0U);
         //LogAndStream used S-, SDLog used SN
         sprintf(commandbuf, "S-,%s\r", advertisingName);
         //sprintf(commandbuf, "SN,%s\r", advertisingName);
@@ -1138,28 +1138,29 @@ void runSetCommands(void)
         if (bt_setcommands_step == RN4678_SET_BLE_LOCAL_ADV_NAME)
         {
           bt_setcommands_step++;
-          /* Append MAC ID to end of BLE advertising name */
+          /* Compose "<prefix>-XXXX" in plain text from the EEPROM brand
+           * record (stock default "S3BLE") and the MAC ID, then hex-encode
+           * it for the IA command.
+           *
+           * Note: Avoiding sprintf with "%02x" as that requires full print
+           * support which increases flash requirements by 6KB */
+          char bleNamePlain[BLE_ADV_NAME_PREFIX_MAX_CHARS + 6]; /* "-XXXX" + NUL */
+          const char *blePrefix = ShimEeprom_getBrandBle();
+          uint8_t bleNameLen = 0;
 
-          /* Note: We were using sprintf with "%02x" to make this a
-           * one-liner but that requires full print support which
-           * increases flash requirements by 6KB */
-          bleCompleteLocalName[10U] = hex[((uint8_t) ('-' >> 4) & 0xF)];
-          bleCompleteLocalName[11U] = hex[(uint8_t) ('-' & 0xF)];
-          bleCompleteLocalName[12U]
-              = hex[(uint8_t) ((ShimBt_macIdStrPtrGet()[8U] >> 4) & 0xF)];
-          bleCompleteLocalName[13U] = hex[(uint8_t) (ShimBt_macIdStrPtrGet()[8U] & 0xF)];
-          bleCompleteLocalName[14U]
-              = hex[(uint8_t) ((ShimBt_macIdStrPtrGet()[9U] >> 4) & 0xF)];
-          bleCompleteLocalName[15U] = hex[(uint8_t) (ShimBt_macIdStrPtrGet()[9U] & 0xF)];
-          bleCompleteLocalName[16U]
-              = hex[(uint8_t) ((ShimBt_macIdStrPtrGet()[10U] >> 4) & 0xF)];
-          bleCompleteLocalName[17U]
-              = hex[(uint8_t) (ShimBt_macIdStrPtrGet()[10U] & 0xF)];
-          bleCompleteLocalName[18U]
-              = hex[(uint8_t) ((ShimBt_macIdStrPtrGet()[11U] >> 4) & 0xF)];
-          bleCompleteLocalName[19U]
-              = hex[(uint8_t) (ShimBt_macIdStrPtrGet()[11U] & 0xF)];
-          bleCompleteLocalName[20U] = 0;
+          while (bleNameLen < BLE_ADV_NAME_PREFIX_MAX_CHARS && blePrefix[bleNameLen] != '\0')
+          {
+            bleNamePlain[bleNameLen] = blePrefix[bleNameLen];
+            bleNameLen++;
+          }
+          bleNamePlain[bleNameLen++] = '-';
+          bleNamePlain[bleNameLen++] = ShimBt_macIdStrPtrGet()[8U];
+          bleNamePlain[bleNameLen++] = ShimBt_macIdStrPtrGet()[9U];
+          bleNamePlain[bleNameLen++] = ShimBt_macIdStrPtrGet()[10U];
+          bleNamePlain[bleNameLen++] = ShimBt_macIdStrPtrGet()[11U];
+          bleNamePlain[bleNameLen] = '\0';
+
+          string2hexString(bleNamePlain, bleCompleteLocalName);
 
           sprintf(commandbuf, "IA,09,%s\r", bleCompleteLocalName);
           writeCommandBufAndExpectAok();
@@ -1571,7 +1572,6 @@ void BT_init(void)
   //connect/disconnect commands
   deviceConn = 0;
   shimmerStatus.btConnected = 0;
-  BT_useSpecificAdvertisingName(0U);
 
   clearExpectedResponseBuf();
   charsReceived = 0;
@@ -1583,11 +1583,9 @@ void BT_init(void)
   latestBtError = BT_ERROR_NONE;
   btRtsLockCounter = 0;
 
-#if ADVERTISING_NAME_IS_OUTPUT
-  BT_setAdvertisingName(ADVERTISING_NAME_OUTPUT);
-#else
-  BT_setAdvertisingName(ADVERTISING_NAME_SHIMMER3);
-#endif
+  /* Classic BT name prefix from the EEPROM brand record (stock default
+   * "Shimmer3" unless customer-branded). The module appends "-XXXX" itself. */
+  BT_setAdvertisingName(ShimEeprom_getBrandBtClassic());
 
   BT_setPIN("1234");
 
@@ -1632,7 +1630,8 @@ void BT_init(void)
    */
   BT_setRn4678BleConnectionParameters("0001,001C,0000,0200");
 
-  BT_setRn4678BleCompleteLocalName(BLE_ADVERTISING_NAME_SHIMMER3);
+  /* Note: the BLE complete local name is composed from the EEPROM brand
+   * record and the MAC ID at the RN4678_SET_BLE_LOCAL_ADV_NAME step. */
 }
 
 void btInit(void)
@@ -1867,14 +1866,9 @@ void BT_setAuthentication(uint8_t auth)
   authenticate = auth;
 }
 
-void BT_setAdvertisingName(char *name)
+void BT_setAdvertisingName(const char *name)
 {
   snprintf(advertisingName, 17, "%s", name);
-}
-
-void BT_useSpecificAdvertisingName(uint8_t val)
-{
-  useSpecificAdvertisingName = val;
 }
 
 void BT_setPIN(char *PIN)
@@ -1950,11 +1944,6 @@ void BT_setRn4678BleConnectionParameters(char *hexval_time)
 {
   snprintf(rn4678BleConnectionParameters, sizeof(rn4678BleConnectionParameters),
       "%s", hexval_time);
-}
-
-void BT_setRn4678BleCompleteLocalName(char *hexval_name)
-{
-  string2hexString(hexval_name, bleCompleteLocalName);
 }
 
 const char *BT_getDesiredRnTxPowerForBtVerSetCmd(void)
@@ -2460,7 +2449,12 @@ void setBleDeviceInformation(char *daughtCardIdStrPtr,
     uint8_t fwVerRelNew)
 {
   daughtCardIdStrPtrForBle = daughtCardIdStrPtr;
-  sprintf(rn4678BleManufacturer, "Shimmer\0");
+  /* BLE Device Information Service manufacturer, from the EEPROM brand record
+   * and truncated to fit the module's field. The stock record holds
+   * "Shimmer Research Ltd.", which truncates to "Shimmer" - exactly the value
+   * this field carried before the record existed. */
+  snprintf(rn4678BleManufacturer, sizeof(rn4678BleManufacturer), "%s",
+      ShimEeprom_getBrandUsbManufacturer());
   /* Assumes major = 1 char and minor = 2 char*/
   sprintf(rn4678BleSwRevision, "%d.%d\0", fwVerMajorNew, fwVerMinorNew);
 }
@@ -2710,18 +2704,9 @@ void checkRn4xRemoteConfigTimer(char *rxBufPtr)
 
 void checkAdvertisingName(char *rxBufPtr)
 {
-  if (useSpecificAdvertisingName)
-  {
-    doesBtConfigNeedUpdating = strstr(rxBufPtr, advertisingName) ? 0 : 1;
-  }
-  else
-  {
-    doesBtConfigNeedUpdating = (strstr(rxBufPtr, advertisingName)
-                                   || strstr(rxBufPtr, ADVERTISING_NAME_OUTPUT)
-                                   || strstr(rxBufPtr, ADVERTISING_NAME_SHIMMER3)) ?
-        0 :
-        1;
-  }
+  /* Compare against the effective (EEPROM brand) name so that a brand change
+   * causes the module's stored name to be rewritten. */
+  doesBtConfigNeedUpdating = strstr(rxBufPtr, advertisingName) ? 0 : 1;
 }
 
 void checkPin(char *rxBufPtr)

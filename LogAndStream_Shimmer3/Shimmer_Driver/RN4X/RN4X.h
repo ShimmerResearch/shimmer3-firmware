@@ -19,13 +19,15 @@
 #define BT_FLUSH_TX_BUF_IF_RN4678_RTS_LOCK_DETECTED 0
 /********** Defines created when testing Bluetooth driver - End ***********/
 
-/* Custom advertising name */
-#define ADVERTISING_NAME_IS_OUTPUT                  0
+/* Advertising name prefixes come from the EEPROM brand record (see
+ * log-and-stream-common/EEPROM/shimmer_eeprom.h — the log-and-stream-common
+ * submodule). The record is seeded with BRAND_DEFAULT_*
+ * compile-time defaults when blank/invalid, so stock units advertise as
+ * "Shimmer3-XXXX" (Classic) and "S3BLE-XXXX" (BLE) exactly as before. */
 
-#define ADVERTISING_NAME_OUTPUT                     "OUTPUT\0"
-#define ADVERTISING_NAME_SHIMMER3                   "Shimmer3\0"
-
-#define BLE_ADVERTISING_NAME_SHIMMER3               "S3BLE\0"
+/* The BLE prefix is capped so that "<prefix>-XXXX" fits the RN4678's 31-byte
+ * advertisement payload alongside the flags AD structure. */
+#define BLE_ADV_NAME_PREFIX_MAX_CHARS               8
 
 typedef enum
 {
@@ -342,12 +344,11 @@ void BT_setAutoMaster(char *master);
 void BT_setDiscoverable(uint8_t disc);
 void BT_setEncryption(uint8_t enc);
 void BT_setAuthentication(uint8_t auth);
-void BT_setAdvertisingName(char *name); //max 16 chars
-void BT_useSpecificAdvertisingName(uint8_t val);
-void BT_setPIN(char *name);                  //max 16 chars
-void BT_setServiceClass(char *serviceClass); //max 4 chars (hex word)
-void BT_setServiceName(char *name);          //max 16 chars
-void BT_setDeviceClass(char *deviceClass);   //max 4 chars (hex word)
+void BT_setAdvertisingName(const char *name); //max 16 chars
+void BT_setPIN(char *name);                   //max 16 chars
+void BT_setServiceClass(char *serviceClass);  //max 4 chars (hex word)
+void BT_setServiceName(char *name);           //max 16 chars
+void BT_setDeviceClass(char *deviceClass);    //max 4 chars (hex word)
 void BT_rn4xDisableRemoteConfig(uint8_t disableRemoteConfig);
 void BT_setUpdateBaudDuringBoot(uint8_t val);
 
@@ -357,7 +358,6 @@ void BT_setPagingTime(char *hexvalTime);        //max 4 chars (hex word)
 void BT_setInquiryScanWindow(char *hexvalTime); //max 4 chars (hex word)
 void BT_setRn4678FastMode(char *hexval_time);
 void BT_setRn4678BleConnectionParameters(char *hexval_time);
-void BT_setRn4678BleCompleteLocalName(char *hexval_name);
 const char *BT_getDesiredRnTxPowerForBtVerSetCmd(void);
 const char *BT_getDesiredRnTxPowerForBtVerGetCmd(void);
 void BT_setRn4678TxPower(rn4678TxPower_et newValue);
