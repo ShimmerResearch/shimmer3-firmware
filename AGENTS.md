@@ -37,3 +37,15 @@ is the firmware identifier registry — keep it in step when adding a build.
 
 `clang-format-check.yml` gates pushes; it checks rather than reformatting, so bad formatting fails CI
 instead of being silently fixed.
+
+## Keep the docs in step with the code
+This repo has no `docs/` of its own — the reference documentation lives in the
+`log-and-stream-common` submodule under `docs/`, and covers both platforms.
+
+The rule there applies to changes made from here: **change behaviour in a subsystem, update its doc
+in the same PR.** The doc is named after the subsystem directory (`Comms/` →
+`SHIMMER3_BT_COMMUNICATION_PROTOCOL.md`, and so on) — see that repo's `AGENTS.md` for the full
+mapping. Scope it to behaviour, not renames or refactors.
+
+A doc change in the submodule is its own PR plus a pointer bump here, so allow for two PRs when the
+change spans both.
