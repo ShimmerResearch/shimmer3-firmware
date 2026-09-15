@@ -4,7 +4,10 @@ name: clang-format-lint
 on: [push]
 
 jobs:
-  build:
+  # Named for what it does. It was `build`, which made the checks list read as
+  # though the firmware was being compiled - this job only runs clang-format.
+  # It also collided with the `build` job in build-release-firmware.yml.
+  format:
     runs-on: ubuntu-latest
 
     steps:
