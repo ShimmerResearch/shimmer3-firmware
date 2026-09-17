@@ -55,11 +55,22 @@ CI only: `build-release-firmware.yml` via **workflow_dispatch** (major/minor/pat
 The push trigger is commented out on purpose, so releases are never accidental. `FirmwareIdentifierList.txt`
 is the firmware identifier registry — keep it in step when adding a build.
 
-**Releases are built from the `Debug` configuration.** `Release` does not build; known and parked.
+**Releases are built from the `Debug` configuration.** `Release` does not build; known and parked —
+the release workflow's `build_mode` input defaults to `Debug` for that reason. See
+`log-and-stream-common/docs/SHIMMER3_BUILD_AND_PROGRAMMING.md` §4.2.
 
 `clang-format-check.yml` runs on every push with `inplace: True` and commits the reformatted result
-back, so a badly formatted push is fixed on your branch rather than rejected. Fetch before tagging a
-release, or the tag may miss the formatting commit.
+back, so a badly formatted push is fixed on your branch rather than rejected. **Pull before your next
+push, and fetch before tagging a release**, or the tag misses the formatting commit. That commit also
+gets no CI run of its own — GitHub does not trigger workflows for `GITHUB_TOKEN` pushes.
+
+Run `Extras/clang-format-all-win64/LogAndStream-Shimmer3.bat` before pushing and the commit never
+appears. Its exclusion (`Shimmer_Driver/FatFs`) matches the workflow's, so local and CI format the
+same set of files.
+
+CI pins clang-format **17**, the bundled `clang-format.exe` is **18.1.8**, and the two currently agree
+on this codebase — the difference is not a live problem, but keep it in mind before blaming churn on
+it. `.clang-format` lives in `LogAndStream_Shimmer3/`, not at the repo root.
 
 ## Keep the docs in step with the code
 This repo has no `docs/` of its own — the reference documentation lives in the
