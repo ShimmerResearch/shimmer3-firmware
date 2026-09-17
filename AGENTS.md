@@ -46,7 +46,8 @@ for one platform and not the other.
 so an expression like `uint8_var * 3600` overflows here and passes there. That class of fault is
 caught only by the real build — see `log-and-stream-common/docs/SHIMMER3_TEST_PROCEDURE.md` §3.2.
 
-The full release procedure — gates, bench matrix, sign-off list — is
+The full release procedure — gates, the radio bring-up matrix, per-model functional
+tests, sign-off list — is
 `log-and-stream-common/docs/SHIMMER3_TEST_PROCEDURE.md`.
 
 ## Release
