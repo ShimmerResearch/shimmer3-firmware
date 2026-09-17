@@ -30,13 +30,35 @@ repo warns you at edit time. Platform-specific behaviour belongs behind the abst
 
 Version pinning is deliberate — check the README table before upgrading either.
 
+## Testing
+The shared submodule carries a host test suite that needs no MSP430 toolchain and no device:
+
+```
+make -C LogAndStream_Shimmer3/log-and-stream-common/Test/host platform-check   # compile for BOTH MCUs
+make -C LogAndStream_Shimmer3/log-and-stream-common/Test/host                  # build and run, ~10 s
+```
+
+`platform-check` is the one that matters most from here: it compiles the shared modules for
+`-DSHIMMER3` *and* `-DSHIMMER3R`, which is the cheapest guard against a submodule change that builds
+for one platform and not the other.
+
+**It cannot stand in for a CCS build.** The host compiler's `int` is 32 bits and the MSP430's is 16,
+so an expression like `uint8_var * 3600` overflows here and passes there. That class of fault is
+caught only by the real build — see `log-and-stream-common/docs/SHIMMER3_TEST_PROCEDURE.md` §3.2.
+
+The full release procedure — gates, bench matrix, sign-off list — is
+`log-and-stream-common/docs/SHIMMER3_TEST_PROCEDURE.md`.
+
 ## Release
 CI only: `build-release-firmware.yml` via **workflow_dispatch** (major/minor/patch, Release/Debug).
 The push trigger is commented out on purpose, so releases are never accidental. `FirmwareIdentifierList.txt`
 is the firmware identifier registry — keep it in step when adding a build.
 
-`clang-format-check.yml` gates pushes; it checks rather than reformatting, so bad formatting fails CI
-instead of being silently fixed.
+**Releases are built from the `Debug` configuration.** `Release` does not build; known and parked.
+
+`clang-format-check.yml` runs on every push with `inplace: True` and commits the reformatted result
+back, so a badly formatted push is fixed on your branch rather than rejected. Fetch before tagging a
+release, or the tag may miss the formatting commit.
 
 ## Keep the docs in step with the code
 This repo has no `docs/` of its own — the reference documentation lives in the
