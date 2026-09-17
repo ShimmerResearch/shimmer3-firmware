@@ -74,8 +74,12 @@ The installer also configures the `log-and-stream-common` submodule, because com
 are its commits and need their own hook configuration.
 
 `Extras/clang-format-all-win64/LogAndStream-Shimmer3.bat` still formats the whole project in one go.
-Its exclusion (`Shimmer_Driver/FatFs`) matches both the workflow's and the hook's, so all three format
-the same set of files — **if you change one, change the other two in the same commit.**
+
+**The exclusion list lives in `.clang-format-exclude` at the repository root, and only there.** The
+workflow, the hook and the `.bat` all read it — the first two through
+`scripts/clang-format-exclude.sh`, which is also the only place the list is interpreted. It names the
+source directory and the paths clang-format must not touch (here: ChaN FatFs). Add a vendor directory
+there and all three follow; there is nothing to keep in step.
 
 CI pins clang-format **17**, the bundled `clang-format.exe` is **18.1.8**, and the two currently agree
 on this codebase — the difference is not a live problem, but keep it in mind before blaming churn on

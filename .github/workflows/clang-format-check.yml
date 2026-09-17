@@ -17,10 +17,19 @@ jobs:
  #     with:
  #       repository: ${{ github.event.pull_request.head.repo.full_name }}
  #       ref: ${{ github.event.pull_request.head.ref }}
+    - name: Read the exclusion list
+      # .clang-format-exclude is the only place the list lives; this turns it
+      # into the fnmatch patterns the action wants. Adding a vendor directory
+      # means editing that file and nothing else.
+      id: excl
+      run: |
+        echo "source=$(scripts/clang-format-exclude.sh --source-root)" >> "$GITHUB_OUTPUT"
+        echo "globs=$(scripts/clang-format-exclude.sh --globs)" >> "$GITHUB_OUTPUT"
+
     - uses: DoozyX/clang-format-lint-action@v0.17
       with:
-        source: './LogAndStream_Shimmer3'
-        exclude: '*/Shimmer_Driver/FatFs'
+        source: './${{ steps.excl.outputs.source }}'
+        exclude: ${{ steps.excl.outputs.globs }}
         extensions: 'h,c'
         clangFormatVersion: 17
         inplace: True

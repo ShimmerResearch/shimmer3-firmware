@@ -34,10 +34,22 @@ edits made through the GitHub web UI.
 - **Touch a partly staged file.** After `git add -p`, formatting would rewrite
   the whole file and re-staging would quietly commit the part you held back. It
   skips those and tells you. Stage the whole file if you want it formatted.
-- **Format anything CI does not.** The `SOURCE_ROOT` and `EXCLUDE_RE` at the top
-  of the hook mirror `.github/workflows/clang-format-check.yml`. **If the
-  workflow's lists change, change the hook's in the same commit** — otherwise
-  local and CI format different sets of files and fight over the difference.
+- **Format anything CI does not.** The hook, the workflow and the Windows `.bat`
+  all read `.clang-format-exclude` at the repository root, through
+  `scripts/clang-format-exclude.sh`. One list, three readers — there is nothing
+  to keep in step. Add a vendor directory there and all three follow.
+
+## The exclusion list
+
+`.clang-format-exclude` at the repository root names the source directory and
+the paths clang-format must not touch. It is the **only** place that list lives:
+the hook reads it through `scripts/clang-format-exclude.sh --filter`, the
+workflow through `--globs`, and the `.bat` reads it directly for its `-I`
+arguments.
+
+That was not true before — the same list was written out three times and the
+copies had already drifted. If you add a vendor directory, add it to that file
+and nothing else.
 
 ## Which clang-format it uses
 

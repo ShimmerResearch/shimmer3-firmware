@@ -24,13 +24,9 @@
 
 set -eu
 
-# --- per-repo configuration --------------------------------------------------
-# These MUST mirror .github/workflows/clang-format-check.yml. If the workflow's
-# source or exclude list changes, change these in the same commit, or local and
-# CI will format different sets of files and fight over the difference.
-SOURCE_ROOT='LogAndStream_Shimmer3'
-EXCLUDE_RE='/Shimmer_Driver/FatFs/'
-# -----------------------------------------------------------------------------
+# The exclusion list and the source root live in .clang-format-exclude, read
+# through scripts/clang-format-exclude.sh. CI and the Windows .bat read the same
+# file, so there is one list and no way for the three to drift apart.
 
 root=$(git rev-parse --show-toplevel)
 bundled="$root/Extras/clang-format-all-win64/clang-format.exe"
@@ -48,13 +44,18 @@ else
   exit 0
 fi
 
+filter="$root/scripts/clang-format-exclude.sh"
+if [ ! -x "$filter" ]; then
+  echo "pre-commit: $filter missing - skipping. CI will format instead." >&2
+  exit 0
+fi
+
 staged=$(git diff --cached --name-only --diff-filter=ACMR -- '*.c' '*.h' || true)
 [ -n "$staged" ] || exit 0
 
-if [ -n "$SOURCE_ROOT" ]; then
-  staged=$(printf '%s\n' "$staged" | grep -E "^$SOURCE_ROOT/" || true)
-fi
-staged=$(printf '%s\n' "$staged" | grep -vE "$EXCLUDE_RE" || true)
+# --filter drops anything outside the source root and anything the exclusion
+# list covers, so the hook formats exactly the set CI formats.
+staged=$(printf '%s\n' "$staged" | "$filter" --filter)
 [ -n "$staged" ] || exit 0
 
 formatted=''
