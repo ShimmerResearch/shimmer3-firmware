@@ -1,0 +1,26 @@
+# clang-format exclusions — THE ONLY PLACE THIS LIST LIVES.
+#
+# Three things read this file, so it is edited here and nowhere else:
+#
+#   .github/workflows/clang-format-check.yml   scripts/clang-format-exclude.sh --globs
+#   .githooks/pre-commit                       scripts/clang-format-exclude.sh --filter
+#   Extras/clang-format-all-win64/*.bat        reads it directly, as -I arguments
+#
+# Before this file existed the same list was written out three times, and the
+# three copies had already drifted. Add a vendor directory here and nowhere else.
+#
+# FORMAT
+#   source-root: <dir>   the project directory clang-format runs over, relative to
+#                        the repository root. Exactly one line. Empty = repo root.
+#   <path>               a path relative to that source root, no trailing slash.
+#                        Excludes that exact file, or that directory and all of it.
+#   # ...                a comment, on its own line. Blank lines ignored.
+#
+# Vendor and generated code only. If you are excluding something we wrote, fix
+# the formatting instead.
+
+
+source-root: LogAndStream_Shimmer3
+
+# ChaN FatFs
+Shimmer_Driver/FatFs

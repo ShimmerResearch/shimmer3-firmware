@@ -1,0 +1,97 @@
+#!/bin/sh
+#
+# Format staged C sources before they are committed.
+#
+# WHY THIS EXISTS. clang-format-check.yml reformats pushed code and commits the
+# result back onto your branch. That works - nobody applies formatting review
+# comments by hand - but it costs a round-trip every time: your branch moves
+# under you, you pull before the next push, and the diff that was reviewed is
+# not the diff that shipped. Around 15% of commits in log-and-stream-common are
+# those bot commits. Formatting here instead means the commit you make is
+# already correct and the bot commit never appears.
+#
+# ENABLE, once per clone:
+#     git config core.hooksPath .githooks
+#   or run .githooks/install.sh (Linux/macOS) or .githooks\install.bat (Windows)
+#
+# BYPASS, for one commit:
+#     git commit --no-verify
+#
+# IT NEVER BLOCKS A COMMIT. If clang-format cannot be found, or a file is only
+# partly staged, it says so and lets the commit through. CI stays the backstop -
+# this hook removes the round-trip for the common case, it does not replace the
+# workflow.
+
+set -eu
+
+# The exclusion list and the source root live in .clang-format-exclude, read
+# through scripts/clang-format-exclude.sh. CI and the Windows .bat read the same
+# file, so there is one list and no way for the three to drift apart.
+
+root=$(git rev-parse --show-toplevel)
+bundled="$root/Extras/clang-format-all-win64/clang-format.exe"
+
+# The repository's own binary is preferred: every developer then has the same
+# one, so nobody's output can drift from a colleague's. On Linux and macOS it is
+# a Windows build and not runnable, so PATH is used instead - install
+# clang-format from your package manager there.
+if [ -x "$bundled" ]; then
+  CF="$bundled"
+elif command -v clang-format >/dev/null 2>&1; then
+  CF=clang-format
+else
+  echo "pre-commit: clang-format not found, skipping. CI will format instead." >&2
+  exit 0
+fi
+
+filter="$root/scripts/clang-format-exclude.sh"
+if [ ! -x "$filter" ]; then
+  echo "pre-commit: $filter missing - skipping. CI will format instead." >&2
+  exit 0
+fi
+
+staged=$(git diff --cached --name-only --diff-filter=ACMR -- '*.c' '*.h' || true)
+[ -n "$staged" ] || exit 0
+
+# --filter drops anything outside the source root and anything the exclusion
+# list covers, so the hook formats exactly the set CI formats.
+staged=$(printf '%s\n' "$staged" | "$filter" --filter)
+[ -n "$staged" ] || exit 0
+
+formatted=''
+skipped=''
+
+while IFS= read -r f; do
+  [ -n "$f" ] || continue
+  [ -f "$f" ] || continue
+
+  # A file with unstaged changes is only partly in this commit - the classic
+  # case being `git add -p`. Formatting rewrites the whole file, and re-staging
+  # it would quietly commit the part deliberately held back. Leave it alone and
+  # say so; CI will format it after the push.
+  if [ -n "$(git diff --name-only -- "$f")" ]; then
+    skipped="$skipped $f"
+    continue
+  fi
+
+  before=$(git hash-object -- "$f")
+  "$CF" -style=file -i -- "$f"
+  after=$(git hash-object -- "$f")
+
+  if [ "$before" != "$after" ]; then
+    git add -- "$f"
+    formatted="$formatted $f"
+  fi
+done <<STAGED_FILES
+$staged
+STAGED_FILES
+
+if [ -n "$formatted" ]; then
+  echo "pre-commit: reformatted and re-staged:$formatted"
+fi
+if [ -n "$skipped" ]; then
+  echo "pre-commit: partly staged, left unformatted:$skipped" >&2
+  echo "pre-commit: stage the whole file if you want it formatted." >&2
+fi
+
+exit 0
