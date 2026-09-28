@@ -1,24 +1,34 @@
-# clang-format exclusions — THE ONLY PLACE THIS LIST LIVES.
+# What clang-format formats, and which clang-format - THE ONLY PLACE THIS LIVES.
 #
-# Three things read this file, so it is edited here and nowhere else:
+# Everything that formats this repository reads this file, so it is edited here
+# and nowhere else:
 #
-#   .github/workflows/clang-format-check.yml   scripts/clang-format-exclude.sh --globs
-#   .githooks/pre-commit                       scripts/clang-format-exclude.sh --filter
-#   Extras/clang-format-all-win64/*.bat        reads it directly, as -I arguments
+#   .github/workflows/clang-format-check.yml   through scripts/clang-format-exclude.sh
+#   .githooks/pre-commit                       through scripts/clang-format-exclude.sh
+#   Extras/clang-format-all-win64/*.bat        directly, where the repository has one
 #
-# Before this file existed the same list was written out three times, and the
-# three copies had already drifted. Add a vendor directory here and nowhere else.
+# Before this file existed the list was written out once per reader, and the
+# copies had drifted. Add a vendor directory here and nowhere else.
 #
 # FORMAT
-#   source-root: <dir>   the project directory clang-format runs over, relative to
-#                        the repository root. Exactly one line. Empty = repo root.
-#   <path>               a path relative to that source root, no trailing slash.
-#                        Excludes that exact file, or that directory and all of it.
+#   clang-format-version: <x.y.z>
+#                        the clang-format CI runs, named as DoozyX names its
+#                        builds. The pre-commit hook formats with exactly this
+#                        version or not at all, so the two never undo each
+#                        other's work. Exactly one line.
+#   source-root: <dir>   a directory clang-format runs over, relative to the
+#                        repository root; empty = the whole repository. Opens a
+#                        section. Repeat it for another root; no root may
+#                        contain another.
+#   <path>               a path relative to the source root above it, no
+#                        trailing slash. Excludes that exact file, or that
+#                        directory and all of it.
 #   # ...                a comment, on its own line. Blank lines ignored.
 #
-# Vendor and generated code only. If you are excluding something we wrote, fix
-# the formatting instead.
+# Vendor code, generated code and data tables only. If you are excluding
+# something we wrote, fix the formatting instead.
 
+clang-format-version: 18.1.8
 
 source-root: LogAndStream_Shimmer3
 

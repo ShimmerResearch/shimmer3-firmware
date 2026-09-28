@@ -75,15 +75,18 @@ are its commits and need their own hook configuration.
 
 `Extras/clang-format-all-win64/LogAndStream-Shimmer3.bat` still formats the whole project in one go.
 
-**The exclusion list lives in `.clang-format-exclude` at the repository root, and only there.** The
-workflow, the hook and the `.bat` all read it — the first two through
-`scripts/clang-format-exclude.sh`, which is also the only place the list is interpreted. It names the
+**What is formatted, and by which clang-format, lives in `.clang-format-exclude` at the repository
+root, and only there.** The workflow, the hook and the `.bat` all read it — the first two through
+`scripts/clang-format-exclude.sh`, which is also the only place the file is interpreted. It names the
 source directory and the paths clang-format must not touch (here: ChaN FatFs). Add a vendor directory
 there and all three follow; there is nothing to keep in step.
 
-CI pins clang-format **17**, the bundled `clang-format.exe` is **18.1.8**, and the two currently agree
-on this codebase — the difference is not a live problem, but keep it in mind before blaming churn on
-it. `.clang-format` lives in `LogAndStream_Shimmer3/`, not at the repo root.
+The same file pins the clang-format CI runs, **18.1.8** — the bundled `clang-format.exe`. The hook
+formats with exactly that version or not at all: given any other binary it skips and says so, rather
+than format a line one way for CI to format it back. The hook, its installers,
+`scripts/clang-format-exclude.sh` and the workflow are byte-identical in `verisense-firmware`,
+`shimmer3r-firmware` and `log-and-stream-common`; change them in all four. `.clang-format` lives in
+`LogAndStream_Shimmer3/`, not at the repo root.
 
 ## Keep the docs in step with the code
 This repo has no `docs/` of its own — the reference documentation lives in the

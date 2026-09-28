@@ -1,7 +1,7 @@
 @echo off
 REM Point git at the hooks checked in under .githooks\. Run once per clone.
 REM Undo with:  git config --unset core.hooksPath
-setlocal enabledelayedexpansion
+setlocal
 cd /d "%~dp0.."
 
 git config core.hooksPath .githooks
@@ -12,14 +12,16 @@ if errorlevel 1 (
 )
 echo Hooks enabled: %CD%
 
-REM The shared library is a separate repository. Editing it from inside a
-REM firmware checkout makes commits in ITS repo, not the parent's, so it needs
-REM its own hook configuration - one clone, two places to set this.
-for /d %%S in (LogAndStream_Shimmer3*) do (
-  if exist "%%S\log-and-stream-common\.githooks" (
-    git -C "%%S\log-and-stream-common" config core.hooksPath .githooks
-    echo Hooks enabled: %%S\log-and-stream-common
-  )
+REM A submodule is a separate repository: commits made inside it are its
+REM commits, and need its own hook configuration. Configure every checked-out
+REM submodule that carries a .githooks of its own - log-and-stream-common, in a
+REM Shimmer3 or Shimmer3R checkout. Vendor submodules have none and are left
+REM alone. git runs the quoted command in its own sh, once per submodule.
+git submodule --quiet foreach --recursive "if [ -d .githooks ]; then git config core.hooksPath .githooks && echo Hooks enabled: $toplevel/$sm_path; fi"
+if errorlevel 1 (
+  echo Failed to configure the submodules' hooks.
+  endlocal
+  exit /b 1
 )
 
 echo.

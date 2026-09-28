@@ -11,16 +11,12 @@ root=$(git rev-parse --show-toplevel)
 git -C "$root" config core.hooksPath .githooks
 echo "hooks enabled: $root"
 
-# The shared library is a separate repository. Editing it from inside a firmware
-# checkout makes commits in ITS repo, not the parent's, so it needs its own hook
-# configuration - one clone, two places to set this. Harmless when the submodule
-# is absent or not checked out.
-for sub in "$root"/LogAndStream_Shimmer3*/log-and-stream-common; do
-  [ -e "$sub/.git" ] || continue
-  [ -d "$sub/.githooks" ] || continue
-  git -C "$sub" config core.hooksPath .githooks
-  echo "hooks enabled: $sub"
-done
+# A submodule is a separate repository: commits made inside it are its commits,
+# and need its own hook configuration. Configure every checked-out submodule
+# that carries a .githooks of its own - log-and-stream-common, in a Shimmer3 or
+# Shimmer3R checkout. Vendor submodules have none and are left alone.
+git -C "$root" submodule --quiet foreach --recursive \
+  'if [ -d .githooks ]; then git config core.hooksPath .githooks && echo "hooks enabled: $toplevel/$sm_path"; fi'
 
 echo
 echo "Staged .c/.h files are now clang-formatted as part of each commit."
