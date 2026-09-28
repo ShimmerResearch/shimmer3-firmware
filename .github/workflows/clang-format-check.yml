@@ -1,46 +1,58 @@
 # https://github.com/marketplace/actions/clang-format-lint
+#
+# Formats pushed code and commits the result back onto the branch. With the
+# pre-commit hook in .githooks/ installed there is nothing left for it to do;
+# it is the backstop for clones without the hook, commits made with
+# --no-verify, and edits made through the GitHub web UI.
+#
+# This file is identical in every firmware repository that carries it. What
+# differs between them - the source roots, the exclusions and the clang-format
+# version - is read from .clang-format-exclude.
 name: clang-format-lint
 
 on: [push]
 
 jobs:
-  # Named for what it does. It was `build`, which made the checks list read as
-  # though the firmware was being compiled - this job only runs clang-format.
-  # It also collided with the `build` job in build-release-firmware.yml.
+  # Named for what it does: `build` made the checks list read as though the
+  # firmware was being compiled, and collided with the build jobs elsewhere.
   format:
+    # The commit below is pushed with GITHUB_TOKEN, which never triggers a
+    # workflow, so this job cannot re-run on its own output. The guard keeps
+    # it that way if the token is ever swapped for one that does.
+    if: github.actor != 'github-actions[bot]'
     runs-on: ubuntu-latest
+    # The action has hung on very large data tables. They are excluded now;
+    # this bounds the cost if one slips back in.
+    timeout-minutes: 10
 
     steps:
     - uses: actions/checkout@v4
-    # To get working on on: [pull_request], uncomment the following
-    # https://github.com/EndBug/add-and-commit#working-with-prs
- #     with:
- #       repository: ${{ github.event.pull_request.head.repo.full_name }}
- #       ref: ${{ github.event.pull_request.head.ref }}
-    - name: Read the exclusion list
-      # .clang-format-exclude is the only place the list lives; this turns it
-      # into the fnmatch patterns the action wants. Adding a vendor directory
-      # means editing that file and nothing else.
-      id: excl
-      run: |
-        echo "source=$(scripts/clang-format-exclude.sh --source-root)" >> "$GITHUB_OUTPUT"
-        echo "globs=$(scripts/clang-format-exclude.sh --globs)" >> "$GITHUB_OUTPUT"
-
-    - uses: DoozyX/clang-format-lint-action@v0.17
       with:
-        source: './${{ steps.excl.outputs.source }}'
-        exclude: ${{ steps.excl.outputs.globs }}
+        # Submodules are other repositories: vendor code, or code that its own
+        # repository's copy of this workflow formats.
+        submodules: false
+
+    - name: Read .clang-format-exclude
+      # The only place the scope and the version live. The pre-commit hook
+      # reads the same file, so the two cannot drift apart.
+      id: scope
+      run: |
+        echo "sources=$(scripts/clang-format-exclude.sh --sources)" >> "$GITHUB_OUTPUT"
+        echo "globs=$(scripts/clang-format-exclude.sh --globs)" >> "$GITHUB_OUTPUT"
+        echo "version=$(scripts/clang-format-exclude.sh --clang-format-version)" >> "$GITHUB_OUTPUT"
+
+    - uses: DoozyX/clang-format-lint-action@v0.20
+      with:
+        source: ${{ steps.scope.outputs.sources }}
+        exclude: ${{ steps.scope.outputs.globs }}
         extensions: 'h,c'
-        clangFormatVersion: 17
+        clangFormatVersion: ${{ steps.scope.outputs.version }}
         inplace: True
         style: file
+
     - uses: EndBug/add-and-commit@v9
       with:
-        # Determines the way the action fills missing author name and email. Three options are available:
-        # - github_actor -> UserName <UserName@users.noreply.github.com>
-        # - user_info -> Your Display Name <your-actual@email.com>
-        # - github_actions -> github-actions <email associated with the github logo>
-        # Default: github_actor
+        # github_actions -> github-actions <41898282+github-actions[bot]@users.noreply.github.com>
         default_author: github_actions
         message: 'Committing clang-format changes'
       env:

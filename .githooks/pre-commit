@@ -5,10 +5,11 @@
 # WHY THIS EXISTS. clang-format-check.yml reformats pushed code and commits the
 # result back onto your branch. That works - nobody applies formatting review
 # comments by hand - but it costs a round-trip every time: your branch moves
-# under you, you pull before the next push, and the diff that was reviewed is
-# not the diff that shipped. Around 15% of commits in log-and-stream-common are
-# those bot commits. Formatting here instead means the commit you make is
-# already correct and the bot commit never appears.
+# under you, the next commit made without pulling conflicts with it, and the
+# diff that was reviewed is not the diff that shipped. In 2026, 13-19% of the
+# commits in each of these repositories were those bot commits. Formatting here
+# instead means the commit you make is already correct and the bot commit never
+# appears.
 #
 # ENABLE, once per clone:
 #     git config core.hooksPath .githooks
@@ -17,19 +18,28 @@
 # BYPASS, for one commit:
 #     git commit --no-verify
 #
-# IT NEVER BLOCKS A COMMIT. If clang-format cannot be found, or a file is only
-# partly staged, it says so and lets the commit through. CI stays the backstop -
-# this hook removes the round-trip for the common case, it does not replace the
-# workflow.
+# IT NEVER BLOCKS A COMMIT. If clang-format cannot be found or is not the
+# version CI runs, or a file is only partly staged, it says so and lets the
+# commit through. CI stays the backstop - this hook removes the round-trip for
+# the common case, it does not replace the workflow.
+#
+# This file is identical in every firmware repository that carries it. Change
+# it in one and copy it to the rest.
 
 set -eu
 
-# The exclusion list and the source root live in .clang-format-exclude, read
-# through scripts/clang-format-exclude.sh. CI and the Windows .bat read the same
-# file, so there is one list and no way for the three to drift apart.
+# What gets formatted, and by which clang-format, lives in .clang-format-exclude
+# and is read through scripts/clang-format-exclude.sh. CI reads the same file,
+# so there is one definition and no way for the hook and the workflow to drift.
 
 root=$(git rev-parse --show-toplevel)
+filter="$root/scripts/clang-format-exclude.sh"
 bundled="$root/Extras/clang-format-all-win64/clang-format.exe"
+
+if [ ! -x "$filter" ]; then
+  echo "pre-commit: $filter missing - skipping. CI will format instead." >&2
+  exit 0
+fi
 
 # The repository's own binary is preferred: every developer then has the same
 # one, so nobody's output can drift from a colleague's. On Linux and macOS it is
@@ -44,22 +54,34 @@ else
   exit 0
 fi
 
-filter="$root/scripts/clang-format-exclude.sh"
-if [ ! -x "$filter" ]; then
-  echo "pre-commit: $filter missing - skipping. CI will format instead." >&2
+# Only the version CI runs. Two versions can disagree about a line, and a hook
+# that formats it one way while CI formats it the other brings back the very
+# bot commits this hook exists to remove - each undoing the other, every push.
+if ! want=$("$filter" --clang-format-version); then
+  echo "pre-commit: cannot read .clang-format-exclude - skipping. CI will format instead." >&2
+  exit 0
+fi
+have=$("$CF" --version 2>/dev/null |
+  sed -n 's/.*clang-format version \([0-9][0-9.]*\).*/\1/p' | head -n 1)
+if [ "$have" != "$want" ]; then
+  echo "pre-commit: $CF is clang-format ${have:-of unknown version}, CI runs $want - skipping so the two cannot disagree. CI will format instead." >&2
   exit 0
 fi
 
 staged=$(git diff --cached --name-only --diff-filter=ACMR -- '*.c' '*.h' || true)
 [ -n "$staged" ] || exit 0
 
-# --filter drops anything outside the source root and anything the exclusion
+# --filter drops anything outside the source roots and anything the exclusion
 # list covers, so the hook formats exactly the set CI formats.
-staged=$(printf '%s\n' "$staged" | "$filter" --filter)
+if ! staged=$(printf '%s\n' "$staged" | "$filter" --filter); then
+  echo "pre-commit: cannot read .clang-format-exclude - skipping. CI will format instead." >&2
+  exit 0
+fi
 [ -n "$staged" ] || exit 0
 
 formatted=''
 skipped=''
+failed=''
 
 while IFS= read -r f; do
   [ -n "$f" ] || continue
@@ -75,7 +97,10 @@ while IFS= read -r f; do
   fi
 
   before=$(git hash-object -- "$f")
-  "$CF" -style=file -i -- "$f"
+  if ! "$CF" -style=file -i -- "$f"; then
+    failed="$failed $f"
+    continue
+  fi
   after=$(git hash-object -- "$f")
 
   if [ "$before" != "$after" ]; then
@@ -92,6 +117,9 @@ fi
 if [ -n "$skipped" ]; then
   echo "pre-commit: partly staged, left unformatted:$skipped" >&2
   echo "pre-commit: stage the whole file if you want it formatted." >&2
+fi
+if [ -n "$failed" ]; then
+  echo "pre-commit: clang-format failed, committed as staged:$failed" >&2
 fi
 
 exit 0
