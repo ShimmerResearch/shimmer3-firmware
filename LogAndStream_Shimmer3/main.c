@@ -646,10 +646,19 @@ void BlinkTimerStop(void)
 
 /* LED phase lock (log-and-stream-common LEDs/). TB0 runs from the same
  * 32768 Hz crystal as the RTC, so its counts are RTC ticks already. CCR3 holds
- * the next blink tick, so the last one was a period before it. */
+ * the next blink tick, so the last one was a period before it. The two are
+ * read with interrupts masked, because the blink ISR advances CCR3. */
 uint16_t platform_ledTickElapsedRtcTicks(void)
 {
-  return (uint16_t) (GetTB0() - (uint16_t) (TB0CCR3 - clk_1000));
+  uint16_t gie = __get_SR_register() & GIE; //Store current GIE state
+  uint16_t tb0, ccr3;
+
+  __disable_interrupt(); //Make this operation atomic
+  tb0 = GetTB0();
+  ccr3 = TB0CCR3;
+  __bis_SR_register(gie); //Restore original GIE state
+
+  return (uint16_t) (tb0 - (uint16_t) (ccr3 - clk_1000));
 }
 
 /* Moves the next blink tick later (positive) or earlier (negative). An
