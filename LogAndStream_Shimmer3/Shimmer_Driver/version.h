@@ -5,8 +5,8 @@
 /* MAJOR is 16-bit, MINOR and PATCH 8-bit, as in firmware_version_t below. */
 #define FW_VERSION_MAJOR  1
 #define FW_VERSION_MINOR  1
-#define FW_VERSION_PATCH  5
-#define FW_VERSION_STRING "v1.01.005"
+#define FW_VERSION_PATCH  6
+#define FW_VERSION_STRING "v1.01.006"
 
 #include <stdint.h>
 
