@@ -644,6 +644,33 @@ void BlinkTimerStop(void)
   TB0CCTL3 &= ~CCIE;
 }
 
+/* LED phase lock (log-and-stream-common LEDs/). TB0 runs from the same
+ * 32768 Hz crystal as the RTC, so its counts are RTC ticks already. CCR3 holds
+ * the next blink tick, so the last one was a period before it. */
+uint16_t platform_ledTickElapsedRtcTicks(void)
+{
+  return (uint16_t) (GetTB0() - (uint16_t) (TB0CCR3 - clk_1000));
+}
+
+/* Moves the next blink tick later (positive) or earlier (negative). An
+ * earlier move is clipped so the compare stays ahead of the counter; the next
+ * second's sync finishes the job. */
+void platform_ledTickShift(int16_t rtcTicks)
+{
+  uint16_t gie = __get_SR_register() & GIE; //Store current GIE state
+  uint16_t remaining;
+
+  __disable_interrupt(); //Make this operation atomic
+  remaining = (uint16_t) (TB0CCR3 - GetTB0());
+  if (rtcTicks < 0 && (uint16_t) (-rtcTicks) + 2U >= remaining)
+  {
+    //remaining is at most a period plus a shift, under 5000 ticks: fits an int16_t
+    rtcTicks = (remaining > 2U) ? (int16_t) (2 - (int16_t) remaining) : 0;
+  }
+  TB0CCR3 += (uint16_t) rtcTicks;
+  __bis_SR_register(gie); //Restore original GIE state
+}
+
 #pragma vector = TIMER0_B1_VECTOR
 
 __interrupt void TIMER0_B1_ISR(void)
@@ -701,9 +728,10 @@ __interrupt void TIMER0_B1_ISR(void)
           Board_ledOn(LED_UPR_GREEN);
         }
       }
-      else
+      else if (LogAndStream_blinkTimerCommon())
       {
-        LogAndStream_blinkTimerCommon();
+        /* A task was queued (the once-a-second LED phase sync) */
+        __bic_SR_register_on_exit(LPM3_bits);
       }
 
       if (ShimBt_checkForBtDataRateTestBlockage())
