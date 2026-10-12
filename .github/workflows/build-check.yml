@@ -1,0 +1,142 @@
+# Build check: does this commit build, and do the shared-library host tests
+# pass? Runs on every pull request and every push to main, so a change that
+# breaks the firmware build fails here, in review, instead of in the release
+# workflow after a version has been bumped and tagged.
+#
+# Builds the configuration that ships - Debug on Shimmer3, because the Release
+# configuration does not build (log-and-stream-common
+# docs/SHIMMER3_BUILD_AND_PROGRAMMING.md §4.2) - with the same Code Composer
+# Studio version and install steps as build-release-firmware.yml, and the same
+# cache key, so the two share one CCS install.
+#
+# This is the build that sees a 16-bit int. The host tests compile with a
+# 32-bit int, so an overflow on the MSP430 is caught here or nowhere.
+#
+# WHAT THIS DOES NOT COVER: the other platform. log-and-stream-common is also a
+# submodule of shimmer3r-firmware; a pointer bump here is checked against the
+# STM32 build only by that repository's own build check.
+
+name: build-check
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: build-check-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  PROJECT_NAME: LogAndStream_Shimmer3
+  PROJECT_DIR: LogAndStream_Shimmer3
+  BUILD_CONFIG: Debug
+  SUBMODULE_FOLDER: log-and-stream-common
+  CCS_VERSION: 12.8.1.00005
+  CCS_INSTALL_DIR: /opt/ti/ccs
+
+jobs:
+  host-tests:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Host tests (log-and-stream-common at the pinned commit)
+        run: make -C "$PROJECT_DIR/$SUBMODULE_FOLDER/Test/host" platform-check test
+
+  build:
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Install prerequisites
+        run: |
+          set -e
+          sudo apt-get update
+          sudo apt-get install -y wget xz-utils libusb-1.0-0 \
+            libxext6 libxrender1 libxtst6 libxi6 libglib2.0-0 libgtk2.0-0 libnss3 ca-certificates \
+            tar gzip coreutils findutils libtinfo5
+
+      - name: Cache CCS
+        id: ccs-cache
+        uses: actions/cache@v4
+        with:
+          path: ${{ env.CCS_INSTALL_DIR }}
+          key: ccs-${{ env.CCS_VERSION }}
+
+      - name: Download and install CCS (if cache miss)
+        if: steps.ccs-cache.outputs.cache-hit != 'true'
+        run: |
+          set -euo pipefail
+          URL="https://dr-download.ti.com/software-development/ide-configuration-compiler-or-debugger/MD-J1VdearkvK/12.8.1/CCS${CCS_VERSION}_linux-x64.tar.gz"
+          wget -q "$URL" -O /tmp/ccs.tar.gz
+          SIZE=$(stat -c%s /tmp/ccs.tar.gz)
+          [ "$SIZE" -gt 500000000 ] || { echo "Archive too small ($SIZE bytes)"; exit 1; }
+          mkdir -p /tmp/ccs
+          tar -xzf /tmp/ccs.tar.gz -C /tmp/ccs
+          INSTALLER=$(find /tmp/ccs -maxdepth 4 -type f -name "ccs_setup_*.run" | head -n1)
+          test -n "$INSTALLER"
+          chmod +x "$INSTALLER"
+          sudo mkdir -p /opt/ti && sudo chown "$(id -u)" /opt/ti
+          "$INSTALLER" --mode unattended --unattendedmodeui none \
+            --prefix "$CCS_INSTALL_DIR" --enable-components PF_MSP430
+          [ -d "$CCS_INSTALL_DIR" ]
+
+      - name: Locate Eclipse
+        id: loc
+        run: |
+          set -euo pipefail
+          for E in "$CCS_INSTALL_DIR/eclipse/eclipse" "$CCS_INSTALL_DIR/ccs/eclipse/eclipse"; do
+            [ -x "$E" ] && { echo "eclipse_bin=$E" >> "$GITHUB_OUTPUT"; exit 0; }
+          done
+          echo "Eclipse not found"; find "$CCS_INSTALL_DIR" -maxdepth 5 -name eclipse -print || true
+          exit 1
+
+      - name: Import project
+        run: |
+          "${{ steps.loc.outputs.eclipse_bin }}" -noSplash \
+            -data "$GITHUB_WORKSPACE/ccs_workspace" \
+            -application com.ti.ccstudio.apps.projectImport \
+            -ccs.location "$GITHUB_WORKSPACE/$PROJECT_NAME"
+
+      - name: Build project (${{ env.BUILD_CONFIG }})
+        run: |
+          "${{ steps.loc.outputs.eclipse_bin }}" -noSplash \
+            -data "$GITHUB_WORKSPACE/ccs_workspace" \
+            -application com.ti.ccstudio.apps.projectBuild \
+            -ccs.projects "$PROJECT_NAME" \
+            -ccs.configuration "$BUILD_CONFIG" \
+            -ccs.cleanBuild
+
+      # The image existing is the pass/fail signal, as in the release workflow,
+      # rather than trusting the headless builder's exit status. No image is
+      # committed to the repository, so after -ccs.cleanBuild a file here is
+      # one this build produced.
+      - name: Check the image was produced
+        run: |
+          set -euo pipefail
+          TXT=$(find "$PROJECT_DIR" -type f -path "*/$BUILD_CONFIG/*.txt" | head -n1 || true)
+          [ -n "$TXT" ] || { echo "::error::no TI-TXT image was produced"; exit 1; }
+          ls -l "$TXT"
+          {
+            echo "### Shimmer3 $BUILD_CONFIG build"
+            echo ""
+            echo "| Image | Bytes | SHA-256 |"
+            echo "|---|---|---|"
+            echo "| \`$(basename "$TXT")\` | $(stat -c%s "$TXT") | \`$(sha256sum "$TXT" | cut -d' ' -f1)\` |"
+          } >> "$GITHUB_STEP_SUMMARY"
+          echo "IMAGE=$TXT" >> "$GITHUB_ENV"
+
+      - name: Upload image
+        uses: actions/upload-artifact@v4
+        with:
+          name: firmware-txt-${{ github.sha }}
+          path: ${{ env.IMAGE }}
+          retention-days: 14
