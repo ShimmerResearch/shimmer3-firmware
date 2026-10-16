@@ -75,12 +75,11 @@ __interrupt void TIMER1_A0_ISR(void)
         {
           exit_lpm = 1;
         }
-        while (j < cb_cnt - 1)
+        for (j = i; j < cb_cnt - 1U; j++)
         { //some cb has gone, every one after him move forward
           clock.timer_remaining_ms[j] = clock.timer_remaining_ms[(uint8_t) (j + 1)];
           clock.timer_cb[j] = clock.timer_cb[(uint8_t) (j + 1)];
           clock.timer_exit_lpm[j] = clock.timer_exit_lpm[(uint8_t) (j + 1)];
-          j++;
         }
         cb_cnt--;
       }
@@ -152,8 +151,8 @@ int msp430_clock_init(void)
   clock.timestamp = 0;
   cb_cnt = 0;
   in_delay_ms = 0;
-  memset(clock.timer_cb, 0, MAX_CB);
-  memset(clock.timer_remaining_ms, 0, MAX_CB);
+  memset(clock.timer_cb, 0, sizeof(clock.timer_cb));
+  memset(clock.timer_remaining_ms, 0, sizeof(clock.timer_remaining_ms));
   return 0;
 }
 
