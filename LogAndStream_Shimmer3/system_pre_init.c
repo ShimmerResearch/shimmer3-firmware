@@ -67,5 +67,7 @@ int _system_pre_init(void)
   /* Return: 0 to omit initialization */
   /* 1 to run initialization          */
   /*==================================*/
-  return 0;
+  /* Run it, so .bss starts zeroed and .data gets its initialisers. Returning
+   * 0 left both holding whatever RAM held at power-on. */
+  return 1;
 }
