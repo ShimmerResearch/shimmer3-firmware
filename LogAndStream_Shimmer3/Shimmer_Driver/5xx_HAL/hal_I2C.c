@@ -405,9 +405,11 @@ uint8_t I2C_Write_Packet_To_Sensor(uint8_t *writeData, uint8_t dataLength)
           || (((start + i2c_timeout) < start) && (now < start)
               && (now >= (start + i2c_timeout))))
       { //needed to handle timer overflow
-        //timeout
-        __bis_SR_register(gie); //Restore original GIE state
+        //timeout. Reset the USCI before restoring GIE: in I2C mode UCSWRST
+        //also clears UCB0IE and UCB0IFG, so no USCI_I2C_ISR can run against
+        //the abandoned transfer once interrupts are back on.
         I2C_Disable();
+        __bis_SR_register(gie); //Restore original GIE state
         __delay_cycles(240000); //10ms (assuming 24MHz clock)
         I2C_Enable();
         return 0;
@@ -468,9 +470,11 @@ uint8_t I2C_Read_Packet_From_Sensor(uint8_t *readData, uint16_t dataLength)
           || (((start + i2c_timeout) < start) && (now < start)
               && (now >= (start + i2c_timeout))))
       { //needed to handle timer overflow
-        //timeout
-        __bis_SR_register(gie); //Restore original GIE state
+        //timeout. Reset the USCI before restoring GIE: in I2C mode UCSWRST
+        //also clears UCB0IE and UCB0IFG, so no USCI_I2C_ISR can run against
+        //the abandoned transfer once interrupts are back on.
         I2C_Disable();
+        __bis_SR_register(gie); //Restore original GIE state
         __delay_cycles(240000); //10ms (assuming 24MHz clock)
         I2C_Enable();
         return 0;
