@@ -2588,32 +2588,32 @@ void setRebootRequired(uint8_t state)
 
 void checkAuth(char *rxBufPtr)
 {
-  char checkBuf[1] = { 0 };
+  char checkBuf[4] = { 0 }; //a uint8_t is at most 3 digits, plus the terminator
   sprintf(checkBuf, "%d", authenticate);
   doesBtConfigNeedUpdating = rxBufPtr[0] == checkBuf[0] ? 0 : 1;
 }
 
 void checkStatusStrPrefixAndSuffix(char *rxBufPtr)
 {
-  char checkBuf[6] = { 0 };
+  const char *checkStr;
 
   if (areBtStatusStringsEnabled())
   {
     if (isBtDeviceRn41orRN42())
     {
-      sprintf(checkBuf, "%s", "%\r\n");
+      checkStr = "%\r\n";
     }
     else
     {
-      sprintf(checkBuf, "%s", "%,%\r\n");
+      checkStr = "%,%\r\n";
     }
   }
   else
   {
-    sprintf(checkBuf, "%s", "NULL\r\n");
+    checkStr = "NULL\r\n";
   }
 
-  doesBtConfigNeedUpdating = strstr(rxBufPtr, checkBuf) ? 0 : 1;
+  doesBtConfigNeedUpdating = strstr(rxBufPtr, checkStr) ? 0 : 1;
 }
 
 void checkOperatingMode(char *rxBufPtr)
