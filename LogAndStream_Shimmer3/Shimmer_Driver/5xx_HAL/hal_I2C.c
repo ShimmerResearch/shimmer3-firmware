@@ -65,15 +65,16 @@ uint16_t rx_packet_length;
 //@brief *rx_packet_data will point to the data to be read
 uint8_t *rx_packet_data;
 
+//The flags and counters below are shared with USCI_I2C_ISR, so they are volatile.
 //@brief receive flag is used for the ISR to know the MSP430 will be reading from the CP
-uint8_t receive_flag;
+volatile uint8_t receive_flag;
 //@brief transmit flag is used for the ISR to know the MSP430 will be writing to the CP
-uint8_t transmit_flag;
+volatile uint8_t transmit_flag;
 
 //@brief Used to keep track how many bytes have been received
-uint16_t rx_byte_ctr;
+volatile uint16_t rx_byte_ctr;
 //@brief Used to keep track how many bytes have been transmitted
-uint8_t tx_byte_ctr;
+volatile uint8_t tx_byte_ctr;
 
 uint16_t i2c_timeout;
 
