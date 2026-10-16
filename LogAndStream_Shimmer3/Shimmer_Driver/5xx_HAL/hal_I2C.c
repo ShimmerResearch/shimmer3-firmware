@@ -371,6 +371,7 @@ uint8_t TI_USCI_I2C_slave_present(uint8_t slave_address)
 uint8_t I2C_Write_Packet_To_Sensor(uint8_t *writeData, uint8_t dataLength)
 {
   uint16_t start, now;
+  uint16_t gie = __get_SR_register() & GIE; //Store current GIE state
 
   //Assign values to local variables
   tx_packet_length = dataLength;
@@ -389,10 +390,13 @@ uint8_t I2C_Write_Packet_To_Sensor(uint8_t *writeData, uint8_t dataLength)
   UCB0IFG |= UCB0TXIFG;
 
   start = GetTB0();
-  //Enter Low Power Mode 0
+  //Enter Low Power Mode 0. The flag is only tested with interrupts disabled,
+  //so the ISR can't clear it between the test and entering LPM0, which
+  //re-enables them in the same instruction.
   while (transmit_flag == 1)
   {
     __bis_SR_register(LPM0_bits + GIE); //CPU off, enable interrupts
+    __disable_interrupt();
     if (transmit_flag)
     {
       //only check for timeout if still waiting to transmit
@@ -402,6 +406,7 @@ uint8_t I2C_Write_Packet_To_Sensor(uint8_t *writeData, uint8_t dataLength)
               && (now >= (start + i2c_timeout))))
       { //needed to handle timer overflow
         //timeout
+        __bis_SR_register(gie); //Restore original GIE state
         I2C_Disable();
         __delay_cycles(240000); //10ms (assuming 24MHz clock)
         I2C_Enable();
@@ -409,6 +414,7 @@ uint8_t I2C_Write_Packet_To_Sensor(uint8_t *writeData, uint8_t dataLength)
       }
     }
   }
+  __bis_SR_register(gie); //Restore original GIE state
   return 1;
 }
 
@@ -427,6 +433,7 @@ uint8_t I2C_Write_Packet_To_Sensor(uint8_t *writeData, uint8_t dataLength)
 uint8_t I2C_Read_Packet_From_Sensor(uint8_t *readData, uint16_t dataLength)
 {
   uint16_t start, now;
+  uint16_t gie = __get_SR_register() & GIE; //Store current GIE state
 
   //Assign values to local variables
   rx_packet_length = dataLength;
@@ -446,10 +453,13 @@ uint8_t I2C_Read_Packet_From_Sensor(uint8_t *readData, uint16_t dataLength)
   UCB0IFG |= UCB0TXIFG;
 
   start = GetTB0();
-  //Enter Low Power Mode 0
+  //Enter Low Power Mode 0. The flag is only tested with interrupts disabled,
+  //so the ISR can't clear it between the test and entering LPM0, which
+  //re-enables them in the same instruction.
   while (receive_flag == 1)
   {
     __bis_SR_register(LPM0_bits + GIE); //CPU off, enable interrupts
+    __disable_interrupt();
     if (receive_flag)
     {
       //only check for timeout if still waiting to transmit
@@ -459,6 +469,7 @@ uint8_t I2C_Read_Packet_From_Sensor(uint8_t *readData, uint16_t dataLength)
               && (now >= (start + i2c_timeout))))
       { //needed to handle timer overflow
         //timeout
+        __bis_SR_register(gie); //Restore original GIE state
         I2C_Disable();
         __delay_cycles(240000); //10ms (assuming 24MHz clock)
         I2C_Enable();
@@ -466,6 +477,7 @@ uint8_t I2C_Read_Packet_From_Sensor(uint8_t *readData, uint16_t dataLength)
       }
     }
   }
+  __bis_SR_register(gie); //Restore original GIE state
   return 1;
 }
 
