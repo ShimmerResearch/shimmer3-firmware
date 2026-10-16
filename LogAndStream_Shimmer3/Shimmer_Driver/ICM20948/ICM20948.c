@@ -321,6 +321,13 @@ uint8_t ICM20948_isMagDataRdy(void)
 //-32752  to 32752
 //if values are 32767 they are not valid
 //either due to data read error or magnetic sensor overflow
+//
+//buf is the XOUT_L slot of an ICM_MAG_RD_SIZE buffer laid out by the
+//ICM_MAG_IDX_* enum - the caller keeps ST1 in the byte before it - so every
+//index here is relative to ICM_MAG_IDX_XOUT_L. Indexing by the enum directly,
+//as ICM20948_getMagAndStatus() can, reads ST2 one byte past the buffer.
+#define ICM_MAG_IDX_FROM_XOUT_L(idx) ((idx) - ICM_MAG_IDX_XOUT_L)
+
 void ICM20948_getMag(uint8_t *buf)
 {
   I2C_Set_Slave_Address(AK09916_MAG_ADDR);
@@ -329,16 +336,16 @@ void ICM20948_getMag(uint8_t *buf)
   /* -1 here because we aren't reading the status 1 register in this read operation */
   I2C_Read_Packet_From_Sensor(buf, (ICM_MAG_RD_SIZE - 1));
 
-  //check Status 2 register
-  if (*(buf + ICM_MAG_IDX_ST2) & 0x08)
+  //check Status 2 register (ST2, 18H): bit 3 is HOFL, magnetic sensor overflow
+  if (buf[ICM_MAG_IDX_FROM_XOUT_L(ICM_MAG_IDX_ST2)] & 0x08)
   {
     //either a read error or mag sensor overflow occurred
-    buf[ICM_MAG_IDX_XOUT_L] = 0xFF;
-    buf[ICM_MAG_IDX_XOUT_H] = 0x7F;
-    buf[ICM_MAG_IDX_YOUT_L] = 0xFF;
-    buf[ICM_MAG_IDX_YOUT_H] = 0x7F;
-    buf[ICM_MAG_IDX_ZOUT_L] = 0xFF;
-    buf[ICM_MAG_IDX_ZOUT_H] = 0x7F;
+    buf[ICM_MAG_IDX_FROM_XOUT_L(ICM_MAG_IDX_XOUT_L)] = 0xFF;
+    buf[ICM_MAG_IDX_FROM_XOUT_L(ICM_MAG_IDX_XOUT_H)] = 0x7F;
+    buf[ICM_MAG_IDX_FROM_XOUT_L(ICM_MAG_IDX_YOUT_L)] = 0xFF;
+    buf[ICM_MAG_IDX_FROM_XOUT_L(ICM_MAG_IDX_YOUT_H)] = 0x7F;
+    buf[ICM_MAG_IDX_FROM_XOUT_L(ICM_MAG_IDX_ZOUT_L)] = 0xFF;
+    buf[ICM_MAG_IDX_FROM_XOUT_L(ICM_MAG_IDX_ZOUT_H)] = 0x7F;
   }
 }
 
