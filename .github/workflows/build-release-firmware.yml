@@ -15,8 +15,10 @@ on:
           - major
           - minor
           - patch
+      # Releases ship from Debug. Release builds the same image until DEV-1217 raises
+      # its optimisation - see log-and-stream-common docs/SHIMMER3_BUILD_AND_PROGRAMMING.md §4.2.
       build_mode:
-        description: "Select build mode:"
+        description: "Build configuration (releases ship from Debug):"
         required: true
         default: "Debug"
         type: choice
