@@ -1697,6 +1697,13 @@ void BT_disable(void)
 //write data to be transmitted to the Bluetooth module - specific to the RN42
 uint8_t BT_write_rn42(uint8_t *buf, uint8_t len, btResponseType responseType)
 {
+  /* Data may not use the space kept for command replies, nor go in while a
+   * reply is held (log-and-stream-common Comms/shimmer_bt_reply.h) */
+  if (responseType == SENSOR_DATA && !ShimBtReply_isRoomForSensorData(len))
+  {
+    return 1; //fail
+  }
+
   if (ShimBt_pushBytesToBtTxBuf(buf, len))
   {
     return 1; //fail
@@ -1722,7 +1729,7 @@ uint8_t BT_write_rn4678_with_buf(uint8_t *buf, uint8_t len, btResponseType respo
 {
   /* Buffer before sending to the BT module */
   if (responseType == SENSOR_DATA
-      && (ShimBt_getUsedSpaceInBtTxBuf() >= sampleSetBufferSize
+      && (!ShimBtReply_isRoomForSensorData(len) || ShimBt_getUsedSpaceInBtTxBuf() >= sampleSetBufferSize
           || ShimBt_btTxInProgressGet() || isBtModuleOverflowPinHigh()))
   {
     return 1; //fail
@@ -1752,6 +1759,12 @@ uint8_t BT_write_rn4678_with_buf(uint8_t *buf, uint8_t len, btResponseType respo
 
 uint8_t BT_write_rn4678_1M(uint8_t *buf, uint8_t len, btResponseType responseType)
 {
+  /* As BT_write_rn42(): keep room for command replies */
+  if (responseType == SENSOR_DATA && !ShimBtReply_isRoomForSensorData(len))
+  {
+    return 1; //fail
+  }
+
   if (ShimBt_pushBytesToBtTxBuf(buf, len))
   {
     return 1; //fail
