@@ -101,6 +101,12 @@ void print_mcu_details(void)
   print_last_reset_reason();
   ShimFactoryTest_sendReport("\r\n");
 
+  /* The deepest the stack has gone between boot and this test starting. */
+  uint16_t stackHighWater = Stack_getHighWater();
+  sprintf(buffer, " - Stack high-water = %u of %u bytes%s\r\n", stackHighWater,
+      Stack_getSize(), (stackHighWater >= Stack_getSize()) ? " (FULL)" : "");
+  ShimFactoryTest_sendReport(buffer);
+
   ShimFactoryTest_sendReport(" - I/O status:\r\n");
   sprintf(buffer, "    - Docked: %s\r\n", shimmerStatus.docked ? "Yes" : "No");
   ShimFactoryTest_sendReport(buffer);

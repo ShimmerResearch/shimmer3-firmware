@@ -129,6 +129,10 @@ char *dierecord;
 
 void main(void)
 {
+  /* First, while interrupts are still disabled, so that the factory test can
+   * report how deep the stack has gone since boot. */
+  Stack_paint();
+
   Init();
 
   while (1)
