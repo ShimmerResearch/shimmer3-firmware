@@ -56,6 +56,17 @@ jobs:
     runs-on: ubuntu-22.04
 
     steps:
+      # A candidate is a version bump committed to a branch, then tagged. Run
+      # from a tag or any other ref there is no branch to commit the bump to,
+      # so the tag would name a commit still carrying the old version.txt,
+      # which promote-release.yml refuses. A dry run commits nothing, so it may.
+      # The ref is a user's choice, so it reaches the shell only as a variable.
+      - name: Refuse a ref that is not a branch
+        if: ${{ github.ref_type != 'branch' && !inputs.dry_run }}
+        run: |
+          echo "::error::Run this from a branch: $GITHUB_REF is not one, so the version bump could not be committed before tagging."
+          exit 1
+
       - name: Checkout code (with submodules)
         uses: actions/checkout@v4
         with:
@@ -246,7 +257,7 @@ jobs:
           git config user.email "github-actions@github.com"
           git add "${{ env.PROJECT_DIR }}/build/version.txt" "${{ env.PROJECT_DIR }}/Shimmer_Driver/version.h"
           git commit -m "chore: bump firmware version to v${{ steps.get_version.outputs.version }}" || echo "No changes to commit"
-          git push origin HEAD:refs/heads/${{ github.ref_name }}
+          git push origin "HEAD:refs/heads/$GITHUB_REF_NAME"
 
       - name: Create Git tag
         if: ${{ !inputs.dry_run }}
