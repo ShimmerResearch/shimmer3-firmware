@@ -246,10 +246,26 @@ jobs:
       - name: Publish the release
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          VERSION: ${{ steps.tag.outputs.version }}
         run: |
           set -euo pipefail
           gh release view "$TAG" --json body -q .body > notes.md
           # The candidate banner no longer applies once it is promoted.
           sed -i '/^\*\*Release candidate - not yet tested\.\*\*/d' notes.md
           { echo ""; echo "---"; echo ""; cat gate.md; } >> notes.md
-          gh release edit "$TAG" --prerelease=false --latest --notes-file notes.md
+          # Latest is what customers are offered, so it only ever moves forward.
+          # Promoting an older candidate - say a fix for an earlier line -
+          # publishes it without taking Latest from a newer release.
+          latest=--latest
+          current=$(gh release view --json tagName -q .tagName 2>/dev/null || true)
+          case "$current" in
+            "$TAG_PREFIX"*)
+              current_v=${current#"$TAG_PREFIX"}
+              newest=$(printf '%s\n%s\n' "$current_v" "$VERSION" | sort -V | tail -n1)
+              if [ "$newest" != "$VERSION" ]; then
+                echo "::warning::$TAG is older than the current Latest, $current; publishing it without marking it Latest."
+                latest=--latest=false
+              fi
+              ;;
+          esac
+          gh release edit "$TAG" --prerelease=false "$latest" --notes-file notes.md
