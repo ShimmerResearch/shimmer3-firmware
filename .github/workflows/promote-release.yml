@@ -43,6 +43,18 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
+      # A dispatch runs the workflow file from the ref it was started on, so
+      # promotion only counts when this file is main's, the reviewed copy.
+      # This stops a promotion run from a branch by mistake. It cannot stop
+      # someone who edits this file on a branch, because the edit can remove
+      # the check too. That needs the secrets in a GitHub environment that
+      # only main may deploy to.
+      - name: Refuse to promote from anything but main
+        if: ${{ github.ref != 'refs/heads/main' }}
+        run: |
+          echo "::error::Run this from main: $GITHUB_REF's copy of the gate is not the reviewed one."
+          exit 1
+
       - name: Check the tag belongs to this platform
         id: tag
         run: |
