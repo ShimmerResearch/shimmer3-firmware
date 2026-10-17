@@ -275,7 +275,10 @@ void InitialiseBt(void)
   }
 
   ShimBt_btCommsProtocolInit();
-  ShimSdSync_init(InitialiseBtAfterBoot, BtStop);
+  /* SD sync starts the module from its timer interrupt, so its start callback
+   * only queues the start for the main loop. Stopping is interrupt-safe and
+   * stays immediate. */
+  ShimSdSync_init(ShimTask_setInitialiseBluetooth, BtStop);
   BT_init();
   BT_rn4xDisableRemoteConfig(1);
   BT_setRadioMode(SLAVE_MODE); //slave mode for center&node
@@ -825,6 +828,11 @@ void BtStart(void)
 
 void BtStop(uint8_t isCalledFromMain)
 {
+  /* A start queued before this stop must not run after it. Starts are queued
+   * to the main loop (TASK_BT_TURN_ON_AFTER_BOOT) while stops are immediate,
+   * so without this the radio could come back on after being turned off. */
+  ShimTask_clear(TASK_BT_TURN_ON_AFTER_BOOT);
+
   if (shimmerStatus.btPowerOn)
   {
     DMA2_disable(); //dma2 for bt disabled

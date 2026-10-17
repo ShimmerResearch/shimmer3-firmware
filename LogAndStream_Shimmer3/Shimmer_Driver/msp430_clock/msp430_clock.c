@@ -114,8 +114,10 @@ int msp430_clock_enable(void)
   clock.ms_per_interrupt = 1;
   clock.enabled = 1;
 
-  /* Enable interrupts. */
-  __bis_SR_register(GIE);
+  /* GIE is left as the caller has it. The main loop already runs with
+   * interrupts enabled, and the RN4x set-up calls this from interrupt
+   * handlers (runSetCommands()), where setting GIE would let other
+   * interrupts nest on top of the running one. */
 
   return 0;
 }
