@@ -85,9 +85,17 @@ jobs:
         run: |
           set -euo pipefail
           mkdir -p reports
-          # gh exits non-zero when nothing matches; zero reports is the gate's
-          # call to make, with a clearer message, not a download error.
-          gh release download "$TAG" -p 'hil-report*.json' -D reports || true
+          # Zero reports is the gate's call to make, with a clearer message, so
+          # it is not an error here. gh exits non-zero both when nothing matches
+          # and when the API fails, so list the assets first and let a real
+          # failure stop the job instead of reaching the gate as "no reports".
+          attached=$(gh release view "$TAG" --json assets \
+            -q '[.assets[].name | select(startswith("hil-report") and endswith(".json"))] | length')
+          if [ "$attached" -gt 0 ]; then
+            gh release download "$TAG" -p 'hil-report*.json' -D reports
+          else
+            echo "No hil-report*.json attached to $TAG."
+          fi
           ls -l reports
 
       - name: Release gate
@@ -113,11 +121,12 @@ jobs:
           GH_TOKEN: ${{ secrets.SUBMODULE_PUSH_TOKEN }}
         run: |
           set -euo pipefail
-          # build-release-firmware.yml creates this release with every
-          # candidate, so a missing one means that run failed part-way or the
-          # release was deleted. Stop rather than publish one without the other.
-          if ! gh release view "$TAG" -R "$SUBMODULE_REPO" >/dev/null; then
-            echo "::error::No $TAG release in $SUBMODULE_REPO. Re-create it as a pre-release (see the 'Create GitHub Release in submodule' step of build-release-firmware.yml), then re-run."
+          # build-release-firmware.yml tags log-and-stream-common and makes this
+          # release there with every candidate. A missing one means that build
+          # did not finish, or the release was deleted: stop here, before Jira
+          # or this platform's release change, so the two never disagree.
+          if ! gh release view "$TAG" -R "$SUBMODULE_REPO" >/dev/null 2>&1; then
+            echo "::error::No $TAG release in $SUBMODULE_REPO. build-release-firmware.yml makes one with every candidate; create it there as a pre-release on the $TAG tag, then re-run this workflow."
             exit 1
           fi
           gh release edit "$TAG" -R "$SUBMODULE_REPO" --prerelease=false
