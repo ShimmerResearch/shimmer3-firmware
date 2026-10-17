@@ -352,7 +352,6 @@ jobs:
           RANGE=$([ -n "$PREV_TAG" ] && echo "$PREV_TAG..$RELEASE_TAG" || echo "$RELEASE_TAG")
 
           ISSUE_KEYS=$(git log --format='%s%n%b' $RANGE | grep -Eo '[A-Z][A-Z0-9]+-[0-9]+' | sort -u || true)
-          [ -z "$ISSUE_KEYS" ] && echo "No Jira issue keys found; skipping." && exit 0
 
           PROJECT_JSON=$(curl -s -u "$JIRA_USER_EMAIL:$JIRA_API_TOKEN" \
             -H 'Accept: application/json' "$JIRA_BASE_URL/rest/api/3/project/$JIRA_PROJECT_KEY")
@@ -378,6 +377,13 @@ jobs:
             [ -z "$VERSION_ID" ] && echo "Failed to create Jira version" && echo "$CREATE_RESP" && exit 1
           else
             VERSION_ID="$EXISTING_VERSION_ID"
+          fi
+
+          # The version exists now, keys or not, so promote-release.yml finds the
+          # candidate's version unreleased. Only the linking needs issue keys.
+          if [ -z "$ISSUE_KEYS" ]; then
+            echo "No Jira issue keys found; nothing to link."
+            exit 0
           fi
 
           while read -r KEY; do
@@ -462,7 +468,6 @@ jobs:
           RANGE=$([ -n "$PREV_TAG" ] && echo "$PREV_TAG..$RELEASE_TAG" || echo "$RELEASE_TAG")
 
           ISSUE_KEYS=$(git log --format='%s%n%b' $RANGE | grep -Eo '[A-Z][A-Z0-9]+-[0-9]+' | sort -u || true)
-          [ -z "$ISSUE_KEYS" ] && echo "No Jira issue keys found; skipping." && exit 0
 
           PROJECT_JSON=$(curl -s -u "$JIRA_USER_EMAIL:$JIRA_API_TOKEN" \
             -H 'Accept: application/json' "$JIRA_BASE_URL/rest/api/3/project/$JIRA_PROJECT_KEY")
@@ -488,6 +493,13 @@ jobs:
             [ -z "$VERSION_ID" ] && echo "Failed to create Jira version" && echo "$CREATE_RESP" && exit 1
           else
             VERSION_ID="$EXISTING_VERSION_ID"
+          fi
+
+          # The version exists now, keys or not, so promote-release.yml finds the
+          # candidate's version unreleased. Only the linking needs issue keys.
+          if [ -z "$ISSUE_KEYS" ]; then
+            echo "No Jira issue keys found; nothing to link."
+            exit 0
           fi
 
           while read -r KEY; do
