@@ -4,10 +4,12 @@
 # people and benches that test it attach their results to it as reports
 # (hil-report*.json). This workflow runs the release gate over those reports and,
 # if every required item is covered on exactly this commit with nothing
-# failing, makes the release public here and in log-and-stream-common, marks
-# the Jira fix version released, and appends the gate's summary to the notes.
+# failing, makes the release public in log-and-stream-common, marks the Jira
+# fix version released, and then makes the release public here with the gate's
+# summary appended to the notes.
 #
-# If the gate blocks, nothing is changed and the job summary says why.
+# If the gate blocks, nothing is changed and the job summary says why. If a
+# later step fails, this release is still a pre-release; re-run the workflow.
 #
 # The gate and the list of required items come from the log-and-stream-common
 # commit the tag pins (Test/hil/), so a candidate is judged by the rules that
@@ -44,11 +46,15 @@ jobs:
         id: tag
         run: |
           set -euo pipefail
-          case "$TAG" in
-            "$TAG_PREFIX"[0-9]*) ;;
-            *) echo "::error::$TAG is not a $TAG_PREFIX tag"; exit 1 ;;
-          esac
-          echo "version=${TAG#"$TAG_PREFIX"}" >> "$GITHUB_OUTPUT"
+          # The whole tag, not just its prefix: the version reaches shell
+          # scripts and a git ref below, so nothing but digits and dots may
+          # get past here. increment_version.sh writes %d.%02d.%03d.
+          version=${TAG#"$TAG_PREFIX"}
+          if [ "$TAG" = "$version" ] || ! [[ "$version" =~ ^[0-9]+\.[0-9]{2}\.[0-9]{3}$ ]]; then
+            echo "::error::$TAG is not a ${TAG_PREFIX}<major>.<minor>.<patch> tag"
+            exit 1
+          fi
+          echo "version=$version" >> "$GITHUB_OUTPUT"
 
       - name: Checkout the tagged commit
         uses: actions/checkout@v4
@@ -59,6 +65,7 @@ jobs:
       - name: Check it is a release candidate
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          VERSION: ${{ steps.tag.outputs.version }}
         run: |
           set -euo pipefail
           pre=$(gh release view "$TAG" --json isPrerelease -q .isPrerelease)
@@ -67,8 +74,8 @@ jobs:
             exit 1
           fi
           built=$(cat "$PROJECT_DIR/build/version.txt")
-          if [ "$built" != "${{ steps.tag.outputs.version }}" ]; then
-            echo "::error::the tag says v${{ steps.tag.outputs.version }} but version.txt at that commit says v$built"
+          if [ "$built" != "$VERSION" ]; then
+            echo "::error::the tag says v$VERSION but version.txt at that commit says v$built"
             exit 1
           fi
 
@@ -84,6 +91,8 @@ jobs:
           ls -l reports
 
       - name: Release gate
+        env:
+          VERSION: ${{ steps.tag.outputs.version }}
         run: |
           set -uo pipefail
           shopt -s nullglob
@@ -91,24 +100,13 @@ jobs:
           python3 "$PROJECT_DIR/$SUBMODULE_FOLDER/Test/hil/hil_gate.py" \
             --platform "$PLATFORM" \
             --commit "$(git rev-parse HEAD)" \
-            --version "${{ steps.tag.outputs.version }}" \
+            --version "$VERSION" \
             --summary gate.md \
             "${reports[@]}"
           rc=$?
           # Exit 2 (an unreadable report) writes no summary; the error is in the log.
           [ -f gate.md ] && cat gate.md >> "$GITHUB_STEP_SUMMARY"
           [ "$rc" -eq 0 ] || { echo "::error::The release gate blocked $TAG - see the job summary."; exit "$rc"; }
-
-      - name: Publish the release
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: |
-          set -euo pipefail
-          gh release view "$TAG" --json body -q .body > notes.md
-          # The candidate banner no longer applies once it is promoted.
-          sed -i '/^\*\*Release candidate - not yet tested\.\*\*/d' notes.md
-          { echo ""; echo "---"; echo ""; cat gate.md; } >> notes.md
-          gh release edit "$TAG" --prerelease=false --latest --notes-file notes.md
 
       - name: Publish the log-and-stream-common release
         env:
@@ -127,9 +125,9 @@ jobs:
           JIRA_USER_EMAIL: ${{ secrets.JIRA_USER_EMAIL }}
           JIRA_API_TOKEN: ${{ secrets.JIRA_API_TOKEN }}
           JIRA_PROJECT_KEY: DEV
+          VERSION: ${{ steps.tag.outputs.version }}
         run: |
           set -euo pipefail
-          VERSION='${{ steps.tag.outputs.version }}'
           JIRA_VERSION="${JIRA_VERSION_PREFIX}${VERSION}"
           RELEASE_DATE="$(date -u +%Y-%m-%d)"
 
@@ -161,3 +159,17 @@ jobs:
             echo "Jira update status: $HTTP"
             echo "$HTTP" | grep -qE '^(200|204)$' || { echo "Failed to mark Jira version released"; exit 1; }
           fi
+
+      # This platform's release goes public last. The two steps above are safe
+      # to repeat, so if any step fails the candidate is still a pre-release
+      # and the whole workflow can be re-run.
+      - name: Publish the release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          gh release view "$TAG" --json body -q .body > notes.md
+          # The candidate banner no longer applies once it is promoted.
+          sed -i '/^\*\*Release candidate - not yet tested\.\*\*/d' notes.md
+          { echo ""; echo "---"; echo ""; cat gate.md; } >> notes.md
+          gh release edit "$TAG" --prerelease=false --latest --notes-file notes.md
