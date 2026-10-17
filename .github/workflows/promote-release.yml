@@ -113,11 +113,14 @@ jobs:
           GH_TOKEN: ${{ secrets.SUBMODULE_PUSH_TOKEN }}
         run: |
           set -euo pipefail
-          if gh release view "$TAG" -R "$SUBMODULE_REPO" >/dev/null 2>&1; then
-            gh release edit "$TAG" -R "$SUBMODULE_REPO" --prerelease=false
-          else
-            echo "No $TAG release in $SUBMODULE_REPO; nothing to publish there."
+          # build-release-firmware.yml creates this release with every
+          # candidate, so a missing one means that run failed part-way or the
+          # release was deleted. Stop rather than publish one without the other.
+          if ! gh release view "$TAG" -R "$SUBMODULE_REPO" >/dev/null; then
+            echo "::error::No $TAG release in $SUBMODULE_REPO. Re-create it as a pre-release (see the 'Create GitHub Release in submodule' step of build-release-firmware.yml), then re-run."
+            exit 1
           fi
+          gh release edit "$TAG" -R "$SUBMODULE_REPO" --prerelease=false
 
       - name: Mark Jira version as released
         env:
