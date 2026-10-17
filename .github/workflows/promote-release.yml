@@ -94,6 +94,12 @@ jobs:
             echo "::error::build-info.json names commit $info_commit, but $TAG is on $(git rev-parse HEAD)."
             exit 1
           fi
+          info_sub=$(jq -r .submodule_commit candidate/build-info.json)
+          pinned=$(git -C "$PROJECT_DIR/$SUBMODULE_FOLDER" rev-parse HEAD)
+          if [ "$info_sub" != "$pinned" ]; then
+            echo "::error::build-info.json names $SUBMODULE_FOLDER $info_sub, but $TAG pins $pinned."
+            exit 1
+          fi
           # And the image it describes must still be attached, unchanged: the
           # reports were made against that file, and it is what goes public.
           image=$(jq -r .image candidate/build-info.json)
@@ -187,13 +193,19 @@ jobs:
           JIRA_VERSION="${JIRA_VERSION_PREFIX}${VERSION}"
           RELEASE_DATE="$(date -u +%Y-%m-%d)"
 
-          PROJECT_JSON=$(curl -s -u "$JIRA_USER_EMAIL:$JIRA_API_TOKEN" \
+          # -f: an HTTP error must stop here. Read as an empty answer, it would
+          # send the lookup below into creating a version that already exists.
+          PROJECT_JSON=$(curl -fsS -u "$JIRA_USER_EMAIL:$JIRA_API_TOKEN" \
             -H 'Accept: application/json' "$JIRA_BASE_URL/rest/api/3/project/$JIRA_PROJECT_KEY")
           PROJECT_ID=$(echo "$PROJECT_JSON" | jq -r '.id // empty')
           [ -z "$PROJECT_ID" ] && echo "Failed to resolve project id" && echo "$PROJECT_JSON" && exit 1
 
-          VERSIONS_JSON=$(curl -s -u "$JIRA_USER_EMAIL:$JIRA_API_TOKEN" \
+          # This endpoint returns every version, unpaginated (the paginated one is
+          # .../project/{key}/version). Anything but that array is an error.
+          VERSIONS_JSON=$(curl -fsS -u "$JIRA_USER_EMAIL:$JIRA_API_TOKEN" \
             -H 'Accept: application/json' "$JIRA_BASE_URL/rest/api/3/project/$JIRA_PROJECT_KEY/versions")
+          echo "$VERSIONS_JSON" | jq -e 'type == "array"' >/dev/null \
+            || { echo "Unexpected Jira versions response"; echo "$VERSIONS_JSON"; exit 1; }
           VERSION_ID=$(echo "$VERSIONS_JSON" | jq -r --arg NAME "$JIRA_VERSION" '
             (.values? // .)
             | (if type=="array" then . else [] end)
