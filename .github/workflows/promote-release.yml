@@ -94,6 +94,20 @@ jobs:
             echo "::error::build-info.json names commit $info_commit, but $TAG is on $(git rev-parse HEAD)."
             exit 1
           fi
+          # And the image it describes must still be attached, unchanged: the
+          # reports were made against that file, and it is what goes public.
+          image=$(jq -r .image candidate/build-info.json)
+          want=$(jq -r .image_sha256 candidate/build-info.json)
+          case "$image" in
+            ""|null|*/*|.*) echo "::error::build-info.json names no usable image ($image)."; exit 1 ;;
+          esac
+          gh release download "$TAG" -p "$image" -D candidate \
+            || { echo "::error::$TAG no longer has $image attached."; exit 1; }
+          got=$(sha256sum "candidate/$image" | cut -d' ' -f1)
+          if [ "$got" != "$want" ]; then
+            echo "::error::$image on $TAG has SHA-256 $got, but build-info.json recorded $want."
+            exit 1
+          fi
 
       - name: Download the test reports
         env:
