@@ -50,10 +50,21 @@ uint16_t Stack_getSize(void)
 uint16_t Stack_getHighWater(void)
 {
   const uint8_t *p = Stack_bottom();
+  uint16_t interruptState;
+
+  /* Interrupts are masked for the scan. An interrupt arriving mid-scan could
+   * otherwise overwrite paint below p after the loop had passed it, and the
+   * result would miss that deeper use. The loop visits only the bytes still
+   * painted, about 1 ms at 24 MHz with today's stack, which suits its one
+   * caller, the factory test. */
+  interruptState = __get_interrupt_state();
+  __disable_interrupt();
 
   while (p < &__STACK_END && *p == STACK_PAINT_BYTE)
   {
     p++;
   }
+
+  __set_interrupt_state(interruptState);
   return (uint16_t) (&__STACK_END - p);
 }
