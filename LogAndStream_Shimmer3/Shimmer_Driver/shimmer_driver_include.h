@@ -10,6 +10,7 @@
 #include "5xx_HAL/hal_InfoMem.h"
 #include "5xx_HAL/hal_RTC.h"
 #include "5xx_HAL/hal_SDCard.h"
+#include "5xx_HAL/hal_Stack.h"
 #include "5xx_HAL/hal_TB0.h"
 #include "5xx_HAL/hal_UCA0.h"
 #include "5xx_HAL/hal_UCS.h"
