@@ -67,6 +67,18 @@ jobs:
           echo "::error::Run this from a branch: $GITHUB_REF is not one, so the version bump could not be committed before tagging."
           exit 1
 
+      # Only the shipping configuration is ever promoted (promote-release.yml,
+      # SHIPPING_CONFIG). A candidate built from the other would take a version
+      # number and a tag and could never go public, so it is refused before
+      # anything is bumped. A dry run of it publishes nothing, so it may.
+      - name: Refuse a candidate from a configuration that does not ship
+        if: ${{ inputs.build_mode != 'Debug' && !inputs.dry_run }}
+        run: |
+          echo "::error::Releases ship from Debug, and promote-release.yml promotes nothing else. Build Debug, or set dry_run to try the $BUILD_MODE build."
+          exit 1
+        env:
+          BUILD_MODE: ${{ inputs.build_mode }}
+
       - name: Checkout code (with submodules)
         uses: actions/checkout@v4
         with:
