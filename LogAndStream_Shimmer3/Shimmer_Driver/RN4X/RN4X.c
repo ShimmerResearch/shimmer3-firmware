@@ -1697,7 +1697,17 @@ void BT_disable(void)
 //write data to be transmitted to the Bluetooth module - specific to the RN42
 uint8_t BT_write_rn42(uint8_t *buf, uint8_t len, btResponseType responseType)
 {
-  if (ShimBt_pushBytesToBtTxBuf(buf, len))
+  /* Data keeps BT_TX_REPLY_RESERVE free for command replies and stays out
+   * while a reply is held (log-and-stream-common Comms/shimmer_bt_reply.h).
+   * Same call depth as the plain push on purpose: see gBtReplyPendingLen. */
+  if (responseType == SENSOR_DATA)
+  {
+    if (gBtReplyPendingLen != 0U || ShimBt_pushBytesToBtTxBufLeaving(buf, len, BT_TX_REPLY_RESERVE))
+    {
+      return 1; //fail
+    }
+  }
+  else if (ShimBt_pushBytesToBtTxBuf(buf, len))
   {
     return 1; //fail
   }
@@ -1722,7 +1732,7 @@ uint8_t BT_write_rn4678_with_buf(uint8_t *buf, uint8_t len, btResponseType respo
 {
   /* Buffer before sending to the BT module */
   if (responseType == SENSOR_DATA
-      && (ShimBt_getUsedSpaceInBtTxBuf() >= sampleSetBufferSize
+      && (gBtReplyPendingLen != 0U || ShimBt_getUsedSpaceInBtTxBuf() >= sampleSetBufferSize
           || ShimBt_btTxInProgressGet() || isBtModuleOverflowPinHigh()))
   {
     return 1; //fail
@@ -1752,7 +1762,17 @@ uint8_t BT_write_rn4678_with_buf(uint8_t *buf, uint8_t len, btResponseType respo
 
 uint8_t BT_write_rn4678_1M(uint8_t *buf, uint8_t len, btResponseType responseType)
 {
-  if (ShimBt_pushBytesToBtTxBuf(buf, len))
+  /* Data keeps BT_TX_REPLY_RESERVE free for command replies and stays out
+   * while a reply is held (log-and-stream-common Comms/shimmer_bt_reply.h).
+   * Same call depth as the plain push on purpose: see gBtReplyPendingLen. */
+  if (responseType == SENSOR_DATA)
+  {
+    if (gBtReplyPendingLen != 0U || ShimBt_pushBytesToBtTxBufLeaving(buf, len, BT_TX_REPLY_RESERVE))
+    {
+      return 1; //fail
+    }
+  }
+  else if (ShimBt_pushBytesToBtTxBuf(buf, len))
   {
     return 1; //fail
   }
@@ -2568,32 +2588,32 @@ void setRebootRequired(uint8_t state)
 
 void checkAuth(char *rxBufPtr)
 {
-  char checkBuf[1] = { 0 };
+  char checkBuf[4] = { 0 }; //a uint8_t is at most 3 digits, plus the terminator
   sprintf(checkBuf, "%d", authenticate);
   doesBtConfigNeedUpdating = rxBufPtr[0] == checkBuf[0] ? 0 : 1;
 }
 
 void checkStatusStrPrefixAndSuffix(char *rxBufPtr)
 {
-  char checkBuf[6] = { 0 };
+  const char *checkStr;
 
   if (areBtStatusStringsEnabled())
   {
     if (isBtDeviceRn41orRN42())
     {
-      sprintf(checkBuf, "%s", "%\r\n");
+      checkStr = "%\r\n";
     }
     else
     {
-      sprintf(checkBuf, "%s", "%,%\r\n");
+      checkStr = "%,%\r\n";
     }
   }
   else
   {
-    sprintf(checkBuf, "%s", "NULL\r\n");
+    checkStr = "NULL\r\n";
   }
 
-  doesBtConfigNeedUpdating = strstr(rxBufPtr, checkBuf) ? 0 : 1;
+  doesBtConfigNeedUpdating = strstr(rxBufPtr, checkStr) ? 0 : 1;
 }
 
 void checkOperatingMode(char *rxBufPtr)

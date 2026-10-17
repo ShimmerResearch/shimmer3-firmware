@@ -40,6 +40,21 @@ uint8_t RN4678_parseStatusString(uint8_t *waitingForArgs, uint8_t *btRxBuffPtr)
   uint8_t numberOfCharRemaining = 0U;
   uint8_t bringUcOutOfSleep = 0U;
 
+  /* A status string is read in steps, each asking for the bytes still
+   * missing, and a string that matches none of the patterns below can keep
+   * asking - "%ERR_CONN_" followed by anything but the expected '%' asks for
+   * 6 more every time. Never let it grow past btStatusStr: drop it and wait
+   * for the next byte, as at the end of a completed string. */
+  if ((uint16_t) btStatusStrIndex + *waitingForArgs > BT_STAT_STR_LEN_LARGEST)
+  {
+    memset(btRxBuffPtr, 0, *waitingForArgs);
+    RN4678_resetStatusString();
+    btStatusStrIndex = 0U;
+    *waitingForArgs = 0U;
+    setDmaWaitingForResponse(1U);
+    return 0U;
+  }
+
   ShimUtil_memcpy_v(btStatusStr + btStatusStrIndex, btRxBuffPtr, *waitingForArgs);
   memset(btRxBuffPtr, 0, *waitingForArgs);
   btStatusStrIndex += *waitingForArgs;
