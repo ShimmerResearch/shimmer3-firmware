@@ -52,6 +52,7 @@ tests, sign-off list — is
 
 ## Release
 CI only: `build-release-firmware.yml` via **workflow_dispatch** (major/minor/patch, Release/Debug).
+It publishes a **pre-release candidate**, run from a branch (`dry_run` only builds). `promote-release.yml`, given the tag, makes it public once the release gate passes (`Test/hil/hil_gate.py` over the attached `hil-report*.json`), and only a `Debug` build.
 The push trigger is commented out on purpose, so releases are never accidental. `FirmwareIdentifierList.txt`
 is the firmware identifier registry — keep it in step when adding a build.
 
