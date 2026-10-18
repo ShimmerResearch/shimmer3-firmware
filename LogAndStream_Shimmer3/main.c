@@ -255,6 +255,10 @@ void Init(void)
   LogAndStream_setBootStage(BOOT_STAGE_END);
 }
 
+/* ShimTask_NORM_manage() calls this with interrupts masked, having found no
+ * task (DEV-1222). Setting GIE in the same instruction as the LPM3 bits is
+ * what closes the window: an interrupt that queued a task since the check is
+ * taken straight away and its __bic_SR_register_on_exit() wakes the CPU. */
 void platform_sleepWhenNoTask(void)
 {
   __bis_SR_register(LPM3_bits + GIE); /* ACLK remains active */
