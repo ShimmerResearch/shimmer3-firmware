@@ -1,0 +1,280 @@
+# Promote a release candidate to a public release - only if it was tested.
+#
+# build-release-firmware.yml publishes every build as a GitHub pre-release. The
+# people and benches that test it attach their results to it as reports
+# (hil-report*.json). This workflow runs the release gate over those reports and,
+# if every required item is covered on exactly this commit with nothing
+# failing, makes the release public in log-and-stream-common, marks the Jira
+# fix version released, and then makes the release public here with the gate's
+# summary appended to the notes.
+#
+# If the gate blocks, nothing is changed and the job summary says why. If a
+# later step fails, this release is still a pre-release; re-run the workflow.
+#
+# The gate and the list of required items come from the log-and-stream-common
+# commit the tag pins (Test/hil/), so a candidate is judged by the rules that
+# were current when it was built. See docs/SHIMMER3_TEST_PROCEDURE.md §10 there.
+
+name: Promote release candidate
+
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Release candidate tag, e.g. LogAndStream_Shimmer3_v1.01.022"
+        required: true
+        type: string
+
+permissions:
+  contents: write  # Needed to edit the release
+
+env:
+  PLATFORM: shimmer3
+  PROJECT_DIR: LogAndStream_Shimmer3
+  TAG_PREFIX: LogAndStream_Shimmer3_v
+  JIRA_VERSION_PREFIX: 'L&S_S3_v'   # note the quotes due to &
+  SUBMODULE_FOLDER: log-and-stream-common
+  SUBMODULE_REPO: ShimmerResearch/log-and-stream-common
+  SHIPPING_CONFIG: Debug   # the only build configuration that may be promoted
+  TAG: ${{ inputs.tag }}
+
+# One promotion at a time: the Latest decision reads the current Latest and
+# then sets it, which two concurrent runs could interleave.
+# GitHub holds one run waiting behind the running one; a third dispatch
+# replaces the waiting run, which then shows as cancelled in Actions.
+# Start the next run only after the last has finished.
+concurrency:
+  group: promote-release
+  cancel-in-progress: false
+
+jobs:
+  promote:
+    runs-on: ubuntu-latest
+
+    steps:
+      # A dispatch runs the workflow file from the ref it was started on, so
+      # promotion only counts when this file is main's, the reviewed copy.
+      # This stops a promotion run from a branch by mistake. It cannot stop
+      # someone who edits this file on a branch, because the edit can remove
+      # the check too. That needs the secrets in a GitHub environment that
+      # only main may deploy to.
+      - name: Refuse to promote from anything but main
+        if: ${{ github.ref != 'refs/heads/main' }}
+        run: |
+          echo "::error::Run this from main: $GITHUB_REF's copy of the gate is not the reviewed one."
+          exit 1
+
+      - name: Check the tag belongs to this platform
+        id: tag
+        run: |
+          set -euo pipefail
+          # The whole tag, not just its prefix: the version reaches shell
+          # scripts and a git ref below, so nothing but digits and dots may
+          # get past here. increment_version.sh writes %d.%02d.%03d.
+          version=${TAG#"$TAG_PREFIX"}
+          if [ "$TAG" = "$version" ] || ! [[ "$version" =~ ^[0-9]+\.[0-9]{2}\.[0-9]{3}$ ]]; then
+            echo "::error::$TAG is not a ${TAG_PREFIX}<major>.<minor>.<patch> tag"
+            exit 1
+          fi
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+
+      - name: Checkout the tagged commit
+        uses: actions/checkout@v4
+        with:
+          ref: refs/tags/${{ inputs.tag }}
+          submodules: recursive
+
+      - name: Check it is a release candidate
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          VERSION: ${{ steps.tag.outputs.version }}
+        run: |
+          set -euo pipefail
+          pre=$(gh release view "$TAG" --json isPrerelease -q .isPrerelease)
+          if [ "$pre" != "true" ]; then
+            echo "::error::$TAG is not a pre-release - it is already public, or was published before the gate existed."
+            exit 1
+          fi
+          built=$(cat "$PROJECT_DIR/build/version.txt")
+          if [ "$built" != "$VERSION" ]; then
+            echo "::error::the tag says v$VERSION but version.txt at that commit says v$built"
+            exit 1
+          fi
+          # build-release-firmware.yml records what it built in build-info.json.
+          # Only the shipping configuration, built from this commit, is promoted:
+          # it also offers the other configuration, for builds nobody ships.
+          gh release download "$TAG" -p build-info.json -D candidate \
+            || { echo "::error::$TAG has no build-info.json, so what it was built from is unknown."; exit 1; }
+          mode=$(jq -r .build_mode candidate/build-info.json)
+          if [ "$mode" != "$SHIPPING_CONFIG" ]; then
+            echo "::error::$TAG was built from the $mode configuration; only $SHIPPING_CONFIG ships."
+            exit 1
+          fi
+          info_commit=$(jq -r .commit candidate/build-info.json)
+          if [ "$info_commit" != "$(git rev-parse HEAD)" ]; then
+            echo "::error::build-info.json names commit $info_commit, but $TAG is on $(git rev-parse HEAD)."
+            exit 1
+          fi
+          info_sub=$(jq -r .submodule_commit candidate/build-info.json)
+          pinned=$(git -C "$PROJECT_DIR/$SUBMODULE_FOLDER" rev-parse HEAD)
+          if [ "$info_sub" != "$pinned" ]; then
+            echo "::error::build-info.json names $SUBMODULE_FOLDER $info_sub, but $TAG pins $pinned."
+            exit 1
+          fi
+          # And the image it describes must still be attached, unchanged: the
+          # reports were made against that file, and it is what goes public.
+          image=$(jq -r .image candidate/build-info.json)
+          want=$(jq -r .image_sha256 candidate/build-info.json)
+          case "$image" in
+            ""|null|*/*|.*) echo "::error::build-info.json names no usable image ($image)."; exit 1 ;;
+          esac
+          gh release download "$TAG" -p "$image" -D candidate \
+            || { echo "::error::$TAG no longer has $image attached."; exit 1; }
+          got=$(sha256sum "candidate/$image" | cut -d' ' -f1)
+          if [ "$got" != "$want" ]; then
+            echo "::error::$image on $TAG has SHA-256 $got, but build-info.json recorded $want."
+            exit 1
+          fi
+
+      - name: Download the test reports
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          mkdir -p reports
+          # Zero reports is the gate's call to make, with a clearer message, so
+          # it is not an error here. gh exits non-zero both when nothing matches
+          # and when the API fails, so list the assets first and let a real
+          # failure stop the job instead of reaching the gate as "no reports".
+          attached=$(gh release view "$TAG" --json assets \
+            -q '[.assets[].name | select(startswith("hil-report") and endswith(".json"))] | length')
+          if [ "$attached" -gt 0 ]; then
+            gh release download "$TAG" -p 'hil-report*.json' -D reports
+          else
+            echo "No hil-report*.json attached to $TAG."
+          fi
+          ls -l reports
+
+      - name: Release gate
+        env:
+          VERSION: ${{ steps.tag.outputs.version }}
+        run: |
+          set -uo pipefail
+          shopt -s nullglob
+          reports=(reports/*.json)   # may be empty: the gate says so itself
+          python3 "$PROJECT_DIR/$SUBMODULE_FOLDER/Test/hil/hil_gate.py" \
+            --platform "$PLATFORM" \
+            --commit "$(git rev-parse HEAD)" \
+            --version "$VERSION" \
+            --summary gate.md \
+            "${reports[@]}"
+          rc=$?
+          # Exit 2 (an unreadable report) writes no summary; the error is in the log.
+          [ -f gate.md ] && cat gate.md >> "$GITHUB_STEP_SUMMARY"
+          [ "$rc" -eq 0 ] || { echo "::error::The release gate blocked $TAG - see the job summary."; exit "$rc"; }
+
+      - name: Publish the log-and-stream-common release
+        env:
+          GH_TOKEN: ${{ secrets.SUBMODULE_PUSH_TOKEN }}
+        run: |
+          set -euo pipefail
+          # build-release-firmware.yml tags log-and-stream-common and makes this
+          # release there with every candidate. A missing one means that build
+          # did not finish, or the release was deleted: stop here, before Jira
+          # or this platform's release change, so the two never disagree.
+          if ! gh release view "$TAG" -R "$SUBMODULE_REPO" >/dev/null 2>&1; then
+            echo "::error::No $TAG release in $SUBMODULE_REPO. build-release-firmware.yml makes one with every candidate; create it there as a pre-release on the $TAG tag, then re-run this workflow."
+            exit 1
+          fi
+          # And it must be this candidate's: its tag on the commit this
+          # candidate pins. A stale or unrelated release under the same name is
+          # refused. One already public is accepted, as a re-run after a later
+          # step failed finds it so.
+          ref=$(gh api "repos/$SUBMODULE_REPO/git/ref/tags/$TAG")
+          sha=$(jq -r .object.sha <<<"$ref")
+          if [ "$(jq -r .object.type <<<"$ref")" = "tag" ]; then
+            sha=$(gh api "repos/$SUBMODULE_REPO/git/tags/$sha" -q .object.sha)
+          fi
+          pinned=$(git -C "$PROJECT_DIR/$SUBMODULE_FOLDER" rev-parse HEAD)
+          if [ "$sha" != "$pinned" ]; then
+            echo "::error::$SUBMODULE_REPO's $TAG is on ${sha:0:12}, but this candidate pins ${pinned:0:12}: not this candidate's release."
+            exit 1
+          fi
+          gh release edit "$TAG" -R "$SUBMODULE_REPO" --prerelease=false
+
+      - name: Mark Jira version as released
+        env:
+          JIRA_BASE_URL: ${{ secrets.JIRA_BASE_URL }}
+          JIRA_USER_EMAIL: ${{ secrets.JIRA_USER_EMAIL }}
+          JIRA_API_TOKEN: ${{ secrets.JIRA_API_TOKEN }}
+          JIRA_PROJECT_KEY: DEV
+          VERSION: ${{ steps.tag.outputs.version }}
+        run: |
+          set -euo pipefail
+          JIRA_VERSION="${JIRA_VERSION_PREFIX}${VERSION}"
+          RELEASE_DATE="$(date -u +%Y-%m-%d)"
+
+          # -f: an HTTP error must stop here. Read as an empty answer, it would
+          # send the lookup below into creating a version that already exists.
+          PROJECT_JSON=$(curl -fsS -u "$JIRA_USER_EMAIL:$JIRA_API_TOKEN" \
+            -H 'Accept: application/json' "$JIRA_BASE_URL/rest/api/3/project/$JIRA_PROJECT_KEY")
+          PROJECT_ID=$(echo "$PROJECT_JSON" | jq -r '.id // empty')
+          [ -z "$PROJECT_ID" ] && echo "Failed to resolve project id" && echo "$PROJECT_JSON" && exit 1
+
+          # This endpoint returns every version, unpaginated (the paginated one is
+          # .../project/{key}/version). Anything but that array is an error.
+          VERSIONS_JSON=$(curl -fsS -u "$JIRA_USER_EMAIL:$JIRA_API_TOKEN" \
+            -H 'Accept: application/json' "$JIRA_BASE_URL/rest/api/3/project/$JIRA_PROJECT_KEY/versions")
+          echo "$VERSIONS_JSON" | jq -e 'type == "array"' >/dev/null \
+            || { echo "Unexpected Jira versions response"; echo "$VERSIONS_JSON"; exit 1; }
+          VERSION_ID=$(echo "$VERSIONS_JSON" | jq -r --arg NAME "$JIRA_VERSION" '
+            (.values? // .)
+            | (if type=="array" then . else [] end)
+            | map(select(.name==$NAME)) | .[0]? | .id? // empty
+          ')
+
+          if [ -z "$VERSION_ID" ]; then
+            CREATE_RESP=$(jq -nc --arg name "$JIRA_VERSION" --arg pid "$PROJECT_ID" --arg date "$RELEASE_DATE" \
+              '{name:$name, projectId:($pid|tonumber), released:true, releaseDate:$date}' \
+              | curl -s -u "$JIRA_USER_EMAIL:$JIRA_API_TOKEN" -H 'Content-Type: application/json' \
+                -d @- "$JIRA_BASE_URL/rest/api/3/version")
+            VERSION_ID=$(echo "$CREATE_RESP" | jq -r '.id // empty')
+            [ -z "$VERSION_ID" ] && echo "Failed to create Jira version" && echo "$CREATE_RESP" && exit 1
+          else
+            HTTP=$(jq -nc --arg date "$RELEASE_DATE" '{released:true, releaseDate:$date}' \
+              | curl -s -o /dev/null -w "%{http_code}\n" -u "$JIRA_USER_EMAIL:$JIRA_API_TOKEN" \
+                -H 'Content-Type: application/json' -X PUT -d @- \
+                "$JIRA_BASE_URL/rest/api/3/version/$VERSION_ID")
+            echo "Jira update status: $HTTP"
+            echo "$HTTP" | grep -qE '^(200|204)$' || { echo "Failed to mark Jira version released"; exit 1; }
+          fi
+
+      # This platform's release goes public last. The two steps above are safe
+      # to repeat, so if any step fails the candidate is still a pre-release
+      # and the whole workflow can be re-run.
+      - name: Publish the release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          VERSION: ${{ steps.tag.outputs.version }}
+        run: |
+          set -euo pipefail
+          gh release view "$TAG" --json body -q .body > notes.md
+          # The candidate banner no longer applies once it is promoted.
+          sed -i '/^\*\*Release candidate - not yet tested\.\*\*/d' notes.md
+          { echo ""; echo "---"; echo ""; cat gate.md; } >> notes.md
+          # Latest is what customers are offered, so it only ever moves forward.
+          # Promoting an older candidate - say a fix for an earlier line -
+          # publishes it without taking Latest from a newer release.
+          latest=--latest
+          current=$(gh release view --json tagName -q .tagName 2>/dev/null || true)
+          case "$current" in
+            "$TAG_PREFIX"*)
+              current_v=${current#"$TAG_PREFIX"}
+              newest=$(printf '%s\n%s\n' "$current_v" "$VERSION" | sort -V | tail -n1)
+              if [ "$newest" != "$VERSION" ]; then
+                echo "::warning::$TAG is older than the current Latest, $current; publishing it without marking it Latest."
+                latest=--latest=false
+              fi
+              ;;
+          esac
+          gh release edit "$TAG" --prerelease=false "$latest" --notes-file notes.md

@@ -1,5 +1,10 @@
 name: LogAndStream_Shimmer3 Build & Release
 
+# Publishes a release CANDIDATE: a GitHub pre-release on a new tag, with the
+# image and build-info.json. Customers are not offered it until it has been
+# tested and promote-release.yml has passed the release gate - see
+# log-and-stream-common docs/SHIMMER3_RELEASE_AND_VERSIONING.md §7.
+
 on:
   # push:
   #   branches:
@@ -25,6 +30,11 @@ on:
         options:
           - Release
           - Debug
+      dry_run:
+        description: "Dry run: build and upload the image as an artifact only - no commit, tag, release or Jira change"
+        required: false
+        default: false
+        type: boolean
 
 permissions:
   contents: write  # Needed for git commit/push and tag creation
@@ -41,11 +51,50 @@ env:
   SUBMODULE_FOLDER: log-and-stream-common
   SUBMODULE_REPO: ShimmerResearch/log-and-stream-common
 
+# One release build at a time: two concurrent runs would read the same
+# version.txt and bump, tag and publish the same version.
+# GitHub holds one run waiting behind the running one; a third dispatch
+# replaces the waiting run, which then shows as cancelled in Actions.
+# Start the next run only after the last has finished.
+concurrency:
+  group: build-release-firmware
+  cancel-in-progress: false
+
 jobs:
   build:
     runs-on: ubuntu-22.04
 
     steps:
+      # BUILD_CONFIG comes from the build_mode input. It reaches shell scripts
+      # only as that variable, and nothing but the two configurations runs.
+      - name: Check the build configuration
+        run: |
+          case "$BUILD_CONFIG" in
+            Release|Debug) ;;
+            *) echo "::error::build_mode must be Release or Debug"; exit 1 ;;
+          esac
+
+      # A candidate is a version bump committed to a branch, then tagged. Run
+      # from a tag or any other ref there is no branch to commit the bump to,
+      # so the tag would name a commit still carrying the old version.txt,
+      # which promote-release.yml refuses. A dry run commits nothing, so it may.
+      # The ref is a user's choice, so it reaches the shell only as a variable.
+      - name: Refuse a ref that is not a branch
+        if: ${{ github.ref_type != 'branch' && !inputs.dry_run }}
+        run: |
+          echo "::error::Run this from a branch: $GITHUB_REF is not one, so the version bump could not be committed before tagging."
+          exit 1
+
+      # Only the shipping configuration is ever promoted (promote-release.yml,
+      # SHIPPING_CONFIG). A candidate built from the other would take a version
+      # number and a tag and could never go public, so it is refused before
+      # anything is bumped. A dry run of it publishes nothing, so it may.
+      - name: Refuse a candidate from a configuration that does not ship
+        if: ${{ inputs.build_mode != 'Debug' && !inputs.dry_run }}
+        run: |
+          echo "::error::Releases ship from Debug, and promote-release.yml promotes nothing else. Build Debug, or set dry_run to try the $BUILD_CONFIG build."
+          exit 1
+
       - name: Checkout code (with submodules)
         uses: actions/checkout@v4
         with:
@@ -69,11 +118,21 @@ jobs:
           sudo apt-get install -y dos2unix
           dos2unix '${{ env.PROJECT_DIR }}'/${{ env.SUBMODULE_FOLDER }}/scripts/*.sh || true
 
+      # Before anything is bumped or tagged: a release must not be cut from a
+      # commit whose shared library fails its own tests.
+      - name: Host tests (log-and-stream-common at the pinned commit)
+        run: make -C "${{ env.PROJECT_DIR }}/${{ env.SUBMODULE_FOLDER }}/Test/host" platform-check test
+
       - name: Increment version
+        env:
+          INCREMENT: ${{ inputs.increment || 'patch' }}
         run: |
           set -euo pipefail
-          inc="${{ github.event.inputs.increment }}"
-          [ -z "$inc" ] && inc=patch
+          # The input reaches the shell only as a variable, and only these three.
+          case "$INCREMENT" in
+            major|minor|patch) inc="$INCREMENT" ;;
+            *) echo "::error::increment must be major, minor or patch"; exit 1 ;;
+          esac
           chmod +x '${{ env.PROJECT_DIR }}/${{ env.SUBMODULE_FOLDER }}/scripts/increment_version.sh'
           '${{ env.PROJECT_DIR }}/${{ env.SUBMODULE_FOLDER }}/scripts/increment_version.sh' "$inc"
 
@@ -209,13 +268,14 @@ jobs:
         run: |
           set -euo pipefail
           mkdir -p build
-          TXT=$(find '${{ env.PROJECT_DIR }}' -type f -path "*/${{ env.BUILD_CONFIG }}/*.txt" | head -n1 || true)
+          TXT=$(find '${{ env.PROJECT_DIR }}' -type f -path "*/$BUILD_CONFIG/*.txt" | head -n1 || true)
           [ -z "$TXT" ] && { echo "No txt produced"; exit 1; }
           cp "$TXT" "build/${{ env.TAG_PREFIX }}${{ steps.get_version.outputs.version }}.txt"
 
       - name: Upload build artifacts
         uses: actions/upload-artifact@v4
         with:
+          overwrite: true  # a re-run uploads under the same name
           name: "${{ env.TAG_PREFIX }}${{ steps.get_version.outputs.version }}"
           path: |
             ${{ env.PROJECT_DIR }}/${{ env.BUILD_CONFIG }}/*.out
@@ -224,16 +284,17 @@ jobs:
             Release/*.txt
 
       - name: Commit version bump
-        if: ${{ github.ref_type == 'branch' }}
+        if: ${{ github.ref_type == 'branch' && !inputs.dry_run }}
         run: |
           set -euo pipefail
           git config user.name "github-actions"
           git config user.email "github-actions@github.com"
           git add "${{ env.PROJECT_DIR }}/build/version.txt" "${{ env.PROJECT_DIR }}/Shimmer_Driver/version.h"
           git commit -m "chore: bump firmware version to v${{ steps.get_version.outputs.version }}" || echo "No changes to commit"
-          git push origin HEAD:refs/heads/${{ github.ref_name }}
+          git push origin "HEAD:refs/heads/$GITHUB_REF_NAME"
 
       - name: Create Git tag
+        if: ${{ !inputs.dry_run }}
         run: |
           set -euo pipefail
           git config user.name "github-actions"
@@ -241,18 +302,59 @@ jobs:
           git tag "${{ env.TAG_PREFIX }}${{ steps.get_version.outputs.version }}"
           git push origin "${{ env.TAG_PREFIX }}${{ steps.get_version.outputs.version }}"
 
-      - name: Create GitHub Release
+      - name: Stop here on a dry run
+        if: ${{ inputs.dry_run }}
+        run: |
+          {
+            echo "### Dry run: v${{ steps.get_version.outputs.version }} built, nothing published"
+            echo ""
+            echo "The image is in this run's artifacts. No commit, tag, release or Jira change was made."
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      # What a tester needs to bind a report to this build: the commit the tag
+      # points at (reports must name it exactly), the shared-library commit,
+      # and the image hash so a flashed unit can be traced back to this file.
+      - name: Write build-info.json
+        if: ${{ !inputs.dry_run }}
+        run: |
+          set -euo pipefail
+          IMG="build/${{ env.TAG_PREFIX }}${{ steps.get_version.outputs.version }}.txt"
+          jq -n \
+            --arg platform shimmer3 \
+            --arg tag "${{ env.TAG_PREFIX }}${{ steps.get_version.outputs.version }}" \
+            --arg version "${{ steps.get_version.outputs.version }}" \
+            --arg commit "$(git rev-parse HEAD)" \
+            --arg submodule_commit "$(git -C '${{ env.PROJECT_DIR }}/${{ env.SUBMODULE_FOLDER }}' rev-parse HEAD)" \
+            --arg build_mode "$BUILD_CONFIG" \
+            --arg image "$(basename "$IMG")" \
+            --arg image_sha256 "$(sha256sum "$IMG" | cut -d' ' -f1)" \
+            --arg run "${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}" \
+            '{schema: "shimmer-build-info/1", platform: $platform, tag: $tag, firmware_version: $version,
+              commit: $commit, submodule_commit: $submodule_commit, build_mode: $build_mode,
+              image: $image, image_sha256: $image_sha256, workflow_run: $run}' \
+            > build/build-info.json
+          cat build/build-info.json
+
+      - name: Create GitHub pre-release (release candidate)
+        if: ${{ !inputs.dry_run }}
         uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ env.TAG_PREFIX }}${{ steps.get_version.outputs.version }}
           name: "${{ env.TAG_PREFIX }}${{ steps.get_version.outputs.version }}"
+          prerelease: true
           generate_release_notes: true
-          files: build/*.txt
+          body: |
+            **Release candidate - not yet tested.** It becomes a full release when its test reports are attached and `promote-release.yml` passes the release gate.
+          files: |
+            build/*.txt
+            build/build-info.json
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
-      # Link main repo issues to Jira issues
+      # Link main repo issues to Jira issues. The fix version is created
+      # unreleased; promote-release.yml marks it released.
       - name: Link GitHub release to Jira
+        if: ${{ !inputs.dry_run }}
         env:
           JIRA_BASE_URL: ${{ secrets.JIRA_BASE_URL }}
           JIRA_USER_EMAIL: ${{ secrets.JIRA_USER_EMAIL }}
@@ -272,15 +374,18 @@ jobs:
           RANGE=$([ -n "$PREV_TAG" ] && echo "$PREV_TAG..$RELEASE_TAG" || echo "$RELEASE_TAG")
 
           ISSUE_KEYS=$(git log --format='%s%n%b' $RANGE | grep -Eo '[A-Z][A-Z0-9]+-[0-9]+' | sort -u || true)
-          [ -z "$ISSUE_KEYS" ] && echo "No Jira issue keys found; skipping." && exit 0
 
-          PROJECT_JSON=$(curl -s -u "$JIRA_USER_EMAIL:$JIRA_API_TOKEN" \
+          # -f: an HTTP error must stop here, not read as "no such version".
+          PROJECT_JSON=$(curl -fsS -u "$JIRA_USER_EMAIL:$JIRA_API_TOKEN" \
             -H 'Accept: application/json' "$JIRA_BASE_URL/rest/api/3/project/$JIRA_PROJECT_KEY")
           PROJECT_ID=$(echo "$PROJECT_JSON" | jq -r '.id // empty')
           [ -z "$PROJECT_ID" ] && echo "Failed to resolve project id" && echo "$PROJECT_JSON" && exit 1
 
-          VERSIONS_JSON=$(curl -s -u "$JIRA_USER_EMAIL:$JIRA_API_TOKEN" \
+          VERSIONS_JSON=$(curl -fsS -u "$JIRA_USER_EMAIL:$JIRA_API_TOKEN" \
             -H 'Accept: application/json' "$JIRA_BASE_URL/rest/api/3/project/$JIRA_PROJECT_KEY/versions")
+          # Unpaginated: every version, as an array. Anything else is an error.
+          echo "$VERSIONS_JSON" | jq -e 'type == "array"' >/dev/null \
+            || { echo "Unexpected Jira versions response"; echo "$VERSIONS_JSON"; exit 1; }
 
           # Normalize to an array, then pick the first matching version id (if any)
           EXISTING_VERSION_ID=$(echo "$VERSIONS_JSON" | jq -r --arg NAME "$JIRA_VERSION" '
@@ -291,13 +396,20 @@ jobs:
 
           if [ -z "$EXISTING_VERSION_ID" ]; then
             CREATE_RESP=$(jq -nc --arg name "$JIRA_VERSION" --arg pid "$PROJECT_ID" --arg date "$(date -u +%Y-%m-%d)" \
-              '{name:$name, projectId:($pid|tonumber), released:true, releaseDate:$date}' \
+              '{name:$name, projectId:($pid|tonumber), released:false, releaseDate:$date}' \
               | curl -s -u "$JIRA_USER_EMAIL:$JIRA_API_TOKEN" -H 'Content-Type: application/json' \
                 -d @- "$JIRA_BASE_URL/rest/api/3/version")
             VERSION_ID=$(echo "$CREATE_RESP" | jq -r '.id // empty')
             [ -z "$VERSION_ID" ] && echo "Failed to create Jira version" && echo "$CREATE_RESP" && exit 1
           else
             VERSION_ID="$EXISTING_VERSION_ID"
+          fi
+
+          # The version exists now, keys or not, so promote-release.yml finds the
+          # candidate's version unreleased. Only the linking needs issue keys.
+          if [ -z "$ISSUE_KEYS" ]; then
+            echo "No Jira issue keys found; nothing to link."
+            exit 0
           fi
 
           while read -r KEY; do
@@ -312,11 +424,13 @@ jobs:
 
       # Create tag and release in submodule
       - name: Remove actions auth header
+        if: ${{ !inputs.dry_run }}
         run: |
           git config --unset-all http.https://github.com/.extraheader || true
           git -C '${{ env.PROJECT_DIR }}/${{ env.SUBMODULE_FOLDER }}' config --unset-all http.https://github.com/.extraheader || true
 
       - name: Prepare submodule remote with PAT
+        if: ${{ !inputs.dry_run }}
         run: |
           set -euo pipefail
           SUB_PATH='${{ env.PROJECT_DIR }}/${{ env.SUBMODULE_FOLDER }}'
@@ -327,6 +441,7 @@ jobs:
           git -C "$SUB_PATH" remote -v
       
       - name: Tag submodule ${{ env.SUBMODULE_FOLDER }}
+        if: ${{ !inputs.dry_run }}
         working-directory: ${{ env.PROJECT_DIR }}/${{ env.SUBMODULE_FOLDER }}
         run: |
           set -euo pipefail
@@ -343,6 +458,7 @@ jobs:
           git push "https://${{ secrets.SUBMODULE_PUSH_USER }}:${{ secrets.SUBMODULE_PUSH_TOKEN }}@github.com/${{ env.SUBMODULE_REPO }}.git" "$tag"
 
       - name: Create GitHub Release in submodule
+        if: ${{ !inputs.dry_run }}
         env:
           GH_TOKEN: ${{ secrets.SUBMODULE_PUSH_TOKEN }}
           TAG: ${{ env.TAG_PREFIX }}${{ steps.get_version.outputs.version }}
@@ -352,11 +468,12 @@ jobs:
             echo "Release $TAG already exists in $SUBMODULE_REPO; skipping."
           else
             # Add files (e.g., `build/*.txt`) after "$TAG" if you want to attach assets
-            gh release create "$TAG" -R "${{ env.SUBMODULE_REPO }}" --title "$TAG" --generate-notes
+            gh release create "$TAG" -R "${{ env.SUBMODULE_REPO }}" --title "$TAG" --generate-notes --prerelease
           fi
 
       # Link submodule repo issues to Jira issues
       - name: Link GitHub release to Jira
+        if: ${{ !inputs.dry_run }}
         working-directory: ${{ env.PROJECT_DIR }}/${{ env.SUBMODULE_FOLDER }}
         env:
           JIRA_BASE_URL: ${{ secrets.JIRA_BASE_URL }}
@@ -377,15 +494,18 @@ jobs:
           RANGE=$([ -n "$PREV_TAG" ] && echo "$PREV_TAG..$RELEASE_TAG" || echo "$RELEASE_TAG")
 
           ISSUE_KEYS=$(git log --format='%s%n%b' $RANGE | grep -Eo '[A-Z][A-Z0-9]+-[0-9]+' | sort -u || true)
-          [ -z "$ISSUE_KEYS" ] && echo "No Jira issue keys found; skipping." && exit 0
 
-          PROJECT_JSON=$(curl -s -u "$JIRA_USER_EMAIL:$JIRA_API_TOKEN" \
+          # -f: an HTTP error must stop here, not read as "no such version".
+          PROJECT_JSON=$(curl -fsS -u "$JIRA_USER_EMAIL:$JIRA_API_TOKEN" \
             -H 'Accept: application/json' "$JIRA_BASE_URL/rest/api/3/project/$JIRA_PROJECT_KEY")
           PROJECT_ID=$(echo "$PROJECT_JSON" | jq -r '.id // empty')
           [ -z "$PROJECT_ID" ] && echo "Failed to resolve project id" && echo "$PROJECT_JSON" && exit 1
 
-          VERSIONS_JSON=$(curl -s -u "$JIRA_USER_EMAIL:$JIRA_API_TOKEN" \
+          VERSIONS_JSON=$(curl -fsS -u "$JIRA_USER_EMAIL:$JIRA_API_TOKEN" \
             -H 'Accept: application/json' "$JIRA_BASE_URL/rest/api/3/project/$JIRA_PROJECT_KEY/versions")
+          # Unpaginated: every version, as an array. Anything else is an error.
+          echo "$VERSIONS_JSON" | jq -e 'type == "array"' >/dev/null \
+            || { echo "Unexpected Jira versions response"; echo "$VERSIONS_JSON"; exit 1; }
 
           # Normalize to an array, then pick the first matching version id (if any)
           EXISTING_VERSION_ID=$(echo "$VERSIONS_JSON" | jq -r --arg NAME "$JIRA_VERSION" '
@@ -396,13 +516,20 @@ jobs:
 
           if [ -z "$EXISTING_VERSION_ID" ]; then
             CREATE_RESP=$(jq -nc --arg name "$JIRA_VERSION" --arg pid "$PROJECT_ID" --arg date "$(date -u +%Y-%m-%d)" \
-              '{name:$name, projectId:($pid|tonumber), released:true, releaseDate:$date}' \
+              '{name:$name, projectId:($pid|tonumber), released:false, releaseDate:$date}' \
               | curl -s -u "$JIRA_USER_EMAIL:$JIRA_API_TOKEN" -H 'Content-Type: application/json' \
                 -d @- "$JIRA_BASE_URL/rest/api/3/version")
             VERSION_ID=$(echo "$CREATE_RESP" | jq -r '.id // empty')
             [ -z "$VERSION_ID" ] && echo "Failed to create Jira version" && echo "$CREATE_RESP" && exit 1
           else
             VERSION_ID="$EXISTING_VERSION_ID"
+          fi
+
+          # The version exists now, keys or not, so promote-release.yml finds the
+          # candidate's version unreleased. Only the linking needs issue keys.
+          if [ -z "$ISSUE_KEYS" ]; then
+            echo "No Jira issue keys found; nothing to link."
+            exit 0
           fi
 
           while read -r KEY; do
@@ -415,44 +542,3 @@ jobs:
               "$JIRA_BASE_URL/rest/api/3/issue/$KEY" | grep -qE '^(204|200)$' || echo "Failed to update $KEY"
           done <<< "$ISSUE_KEYS"
 
-      - name: Mark Jira version as released
-        env:
-          JIRA_BASE_URL: ${{ secrets.JIRA_BASE_URL }}
-          JIRA_USER_EMAIL: ${{ secrets.JIRA_USER_EMAIL }}
-          JIRA_API_TOKEN: ${{ secrets.JIRA_API_TOKEN }}
-          JIRA_PROJECT_KEY: DEV
-          JIRA_VERSION_PREFIX: ${{ env.JIRA_VERSION_PREFIX }}
-        run: |
-          set -euo pipefail
-          VERSION='${{ steps.get_version.outputs.version }}'
-          JIRA_VERSION="${JIRA_VERSION_PREFIX}${VERSION}"
-          RELEASE_DATE="$(date -u +%Y-%m-%d)"
-      
-          PROJECT_JSON=$(curl -s -u "$JIRA_USER_EMAIL:$JIRA_API_TOKEN" \
-            -H 'Accept: application/json' "$JIRA_BASE_URL/rest/api/3/project/$JIRA_PROJECT_KEY")
-          PROJECT_ID=$(echo "$PROJECT_JSON" | jq -r '.id // empty')
-          [ -z "$PROJECT_ID" ] && echo "Failed to resolve project id" && echo "$PROJECT_JSON" && exit 1
-      
-          VERSIONS_JSON=$(curl -s -u "$JIRA_USER_EMAIL:$JIRA_API_TOKEN" \
-            -H 'Accept: application/json' "$JIRA_BASE_URL/rest/api/3/project/$JIRA_PROJECT_KEY/versions")
-          VERSION_ID=$(echo "$VERSIONS_JSON" | jq -r --arg NAME "$JIRA_VERSION" '
-            (.values? // .)
-            | (if type=="array" then . else [] end)
-            | map(select(.name==$NAME)) | .[0]? | .id? // empty
-          ')
-      
-          if [ -z "$VERSION_ID" ]; then
-            CREATE_RESP=$(jq -nc --arg name "$JIRA_VERSION" --arg pid "$PROJECT_ID" --arg date "$RELEASE_DATE" \
-              '{name:$name, projectId:($pid|tonumber), released:true, releaseDate:$date}' \
-              | curl -s -u "$JIRA_USER_EMAIL:$JIRA_API_TOKEN" -H 'Content-Type: application/json' \
-                -d @- "$JIRA_BASE_URL/rest/api/3/version")
-            VERSION_ID=$(echo "$CREATE_RESP" | jq -r '.id // empty')
-            [ -z "$VERSION_ID" ] && echo "Failed to create Jira version" && echo "$CREATE_RESP" && exit 1
-          else
-            HTTP=$(jq -nc --arg date "$RELEASE_DATE" '{released:true, releaseDate:$date}' \
-              | curl -s -o /dev/null -w "%{http_code}\n" -u "$JIRA_USER_EMAIL:$JIRA_API_TOKEN" \
-                -H 'Content-Type: application/json' -X PUT -d @- \
-                "$JIRA_BASE_URL/rest/api/3/version/$VERSION_ID")
-            echo "Jira update status: $HTTP"
-            echo "$HTTP" | grep -qE '^(200|204)$' || { echo "Failed to mark Jira version released"; exit 1; }
-          fi

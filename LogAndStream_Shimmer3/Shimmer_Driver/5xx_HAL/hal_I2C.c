@@ -65,15 +65,16 @@ uint16_t rx_packet_length;
 //@brief *rx_packet_data will point to the data to be read
 uint8_t *rx_packet_data;
 
+//The flags and counters below are shared with USCI_I2C_ISR, so they are volatile.
 //@brief receive flag is used for the ISR to know the MSP430 will be reading from the CP
-uint8_t receive_flag;
+volatile uint8_t receive_flag;
 //@brief transmit flag is used for the ISR to know the MSP430 will be writing to the CP
-uint8_t transmit_flag;
+volatile uint8_t transmit_flag;
 
 //@brief Used to keep track how many bytes have been received
-uint16_t rx_byte_ctr;
+volatile uint16_t rx_byte_ctr;
 //@brief Used to keep track how many bytes have been transmitted
-uint8_t tx_byte_ctr;
+volatile uint8_t tx_byte_ctr;
 
 uint16_t i2c_timeout;
 
@@ -370,6 +371,7 @@ uint8_t TI_USCI_I2C_slave_present(uint8_t slave_address)
 uint8_t I2C_Write_Packet_To_Sensor(uint8_t *writeData, uint8_t dataLength)
 {
   uint16_t start, now;
+  uint16_t gie = __get_SR_register() & GIE; //Store current GIE state
 
   //Assign values to local variables
   tx_packet_length = dataLength;
@@ -388,10 +390,13 @@ uint8_t I2C_Write_Packet_To_Sensor(uint8_t *writeData, uint8_t dataLength)
   UCB0IFG |= UCB0TXIFG;
 
   start = GetTB0();
-  //Enter Low Power Mode 0
+  //Enter Low Power Mode 0. The flag is only tested with interrupts disabled,
+  //so the ISR can't clear it between the test and entering LPM0, which
+  //re-enables them in the same instruction.
   while (transmit_flag == 1)
   {
     __bis_SR_register(LPM0_bits + GIE); //CPU off, enable interrupts
+    __disable_interrupt();
     if (transmit_flag)
     {
       //only check for timeout if still waiting to transmit
@@ -400,14 +405,18 @@ uint8_t I2C_Write_Packet_To_Sensor(uint8_t *writeData, uint8_t dataLength)
           || (((start + i2c_timeout) < start) && (now < start)
               && (now >= (start + i2c_timeout))))
       { //needed to handle timer overflow
-        //timeout
+        //timeout. Reset the USCI before restoring GIE: in I2C mode UCSWRST
+        //also clears UCB0IE and UCB0IFG, so no USCI_I2C_ISR can run against
+        //the abandoned transfer once interrupts are back on.
         I2C_Disable();
+        __bis_SR_register(gie); //Restore original GIE state
         __delay_cycles(240000); //10ms (assuming 24MHz clock)
         I2C_Enable();
         return 0;
       }
     }
   }
+  __bis_SR_register(gie); //Restore original GIE state
   return 1;
 }
 
@@ -426,6 +435,7 @@ uint8_t I2C_Write_Packet_To_Sensor(uint8_t *writeData, uint8_t dataLength)
 uint8_t I2C_Read_Packet_From_Sensor(uint8_t *readData, uint16_t dataLength)
 {
   uint16_t start, now;
+  uint16_t gie = __get_SR_register() & GIE; //Store current GIE state
 
   //Assign values to local variables
   rx_packet_length = dataLength;
@@ -445,10 +455,13 @@ uint8_t I2C_Read_Packet_From_Sensor(uint8_t *readData, uint16_t dataLength)
   UCB0IFG |= UCB0TXIFG;
 
   start = GetTB0();
-  //Enter Low Power Mode 0
+  //Enter Low Power Mode 0. The flag is only tested with interrupts disabled,
+  //so the ISR can't clear it between the test and entering LPM0, which
+  //re-enables them in the same instruction.
   while (receive_flag == 1)
   {
     __bis_SR_register(LPM0_bits + GIE); //CPU off, enable interrupts
+    __disable_interrupt();
     if (receive_flag)
     {
       //only check for timeout if still waiting to transmit
@@ -457,14 +470,18 @@ uint8_t I2C_Read_Packet_From_Sensor(uint8_t *readData, uint16_t dataLength)
           || (((start + i2c_timeout) < start) && (now < start)
               && (now >= (start + i2c_timeout))))
       { //needed to handle timer overflow
-        //timeout
+        //timeout. Reset the USCI before restoring GIE: in I2C mode UCSWRST
+        //also clears UCB0IE and UCB0IFG, so no USCI_I2C_ISR can run against
+        //the abandoned transfer once interrupts are back on.
         I2C_Disable();
+        __bis_SR_register(gie); //Restore original GIE state
         __delay_cycles(240000); //10ms (assuming 24MHz clock)
         I2C_Enable();
         return 0;
       }
     }
   }
+  __bis_SR_register(gie); //Restore original GIE state
   return 1;
 }
 
