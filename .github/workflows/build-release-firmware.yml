@@ -51,11 +51,29 @@ env:
   SUBMODULE_FOLDER: log-and-stream-common
   SUBMODULE_REPO: ShimmerResearch/log-and-stream-common
 
+# One release build at a time: two concurrent runs would read the same
+# version.txt and bump, tag and publish the same version.
+# GitHub holds one run waiting behind the running one; a third dispatch
+# replaces the waiting run, which then shows as cancelled in Actions.
+# Start the next run only after the last has finished.
+concurrency:
+  group: build-release-firmware
+  cancel-in-progress: false
+
 jobs:
   build:
     runs-on: ubuntu-22.04
 
     steps:
+      # BUILD_CONFIG comes from the build_mode input. It reaches shell scripts
+      # only as that variable, and nothing but the two configurations runs.
+      - name: Check the build configuration
+        run: |
+          case "$BUILD_CONFIG" in
+            Release|Debug) ;;
+            *) echo "::error::build_mode must be Release or Debug"; exit 1 ;;
+          esac
+
       # A candidate is a version bump committed to a branch, then tagged. Run
       # from a tag or any other ref there is no branch to commit the bump to,
       # so the tag would name a commit still carrying the old version.txt,
@@ -74,10 +92,8 @@ jobs:
       - name: Refuse a candidate from a configuration that does not ship
         if: ${{ inputs.build_mode != 'Debug' && !inputs.dry_run }}
         run: |
-          echo "::error::Releases ship from Debug, and promote-release.yml promotes nothing else. Build Debug, or set dry_run to try the $BUILD_MODE build."
+          echo "::error::Releases ship from Debug, and promote-release.yml promotes nothing else. Build Debug, or set dry_run to try the $BUILD_CONFIG build."
           exit 1
-        env:
-          BUILD_MODE: ${{ inputs.build_mode }}
 
       - name: Checkout code (with submodules)
         uses: actions/checkout@v4
@@ -108,10 +124,15 @@ jobs:
         run: make -C "${{ env.PROJECT_DIR }}/${{ env.SUBMODULE_FOLDER }}/Test/host" platform-check test
 
       - name: Increment version
+        env:
+          INCREMENT: ${{ inputs.increment || 'patch' }}
         run: |
           set -euo pipefail
-          inc="${{ github.event.inputs.increment }}"
-          [ -z "$inc" ] && inc=patch
+          # The input reaches the shell only as a variable, and only these three.
+          case "$INCREMENT" in
+            major|minor|patch) inc="$INCREMENT" ;;
+            *) echo "::error::increment must be major, minor or patch"; exit 1 ;;
+          esac
           chmod +x '${{ env.PROJECT_DIR }}/${{ env.SUBMODULE_FOLDER }}/scripts/increment_version.sh'
           '${{ env.PROJECT_DIR }}/${{ env.SUBMODULE_FOLDER }}/scripts/increment_version.sh' "$inc"
 
@@ -247,13 +268,14 @@ jobs:
         run: |
           set -euo pipefail
           mkdir -p build
-          TXT=$(find '${{ env.PROJECT_DIR }}' -type f -path "*/${{ env.BUILD_CONFIG }}/*.txt" | head -n1 || true)
+          TXT=$(find '${{ env.PROJECT_DIR }}' -type f -path "*/$BUILD_CONFIG/*.txt" | head -n1 || true)
           [ -z "$TXT" ] && { echo "No txt produced"; exit 1; }
           cp "$TXT" "build/${{ env.TAG_PREFIX }}${{ steps.get_version.outputs.version }}.txt"
 
       - name: Upload build artifacts
         uses: actions/upload-artifact@v4
         with:
+          overwrite: true  # a re-run uploads under the same name
           name: "${{ env.TAG_PREFIX }}${{ steps.get_version.outputs.version }}"
           path: |
             ${{ env.PROJECT_DIR }}/${{ env.BUILD_CONFIG }}/*.out
@@ -303,7 +325,7 @@ jobs:
             --arg version "${{ steps.get_version.outputs.version }}" \
             --arg commit "$(git rev-parse HEAD)" \
             --arg submodule_commit "$(git -C '${{ env.PROJECT_DIR }}/${{ env.SUBMODULE_FOLDER }}' rev-parse HEAD)" \
-            --arg build_mode "${{ github.event.inputs.build_mode }}" \
+            --arg build_mode "$BUILD_CONFIG" \
             --arg image "$(basename "$IMG")" \
             --arg image_sha256 "$(sha256sum "$IMG" | cut -d' ' -f1)" \
             --arg run "${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}" \
@@ -353,13 +375,17 @@ jobs:
 
           ISSUE_KEYS=$(git log --format='%s%n%b' $RANGE | grep -Eo '[A-Z][A-Z0-9]+-[0-9]+' | sort -u || true)
 
-          PROJECT_JSON=$(curl -s -u "$JIRA_USER_EMAIL:$JIRA_API_TOKEN" \
+          # -f: an HTTP error must stop here, not read as "no such version".
+          PROJECT_JSON=$(curl -fsS -u "$JIRA_USER_EMAIL:$JIRA_API_TOKEN" \
             -H 'Accept: application/json' "$JIRA_BASE_URL/rest/api/3/project/$JIRA_PROJECT_KEY")
           PROJECT_ID=$(echo "$PROJECT_JSON" | jq -r '.id // empty')
           [ -z "$PROJECT_ID" ] && echo "Failed to resolve project id" && echo "$PROJECT_JSON" && exit 1
 
-          VERSIONS_JSON=$(curl -s -u "$JIRA_USER_EMAIL:$JIRA_API_TOKEN" \
+          VERSIONS_JSON=$(curl -fsS -u "$JIRA_USER_EMAIL:$JIRA_API_TOKEN" \
             -H 'Accept: application/json' "$JIRA_BASE_URL/rest/api/3/project/$JIRA_PROJECT_KEY/versions")
+          # Unpaginated: every version, as an array. Anything else is an error.
+          echo "$VERSIONS_JSON" | jq -e 'type == "array"' >/dev/null \
+            || { echo "Unexpected Jira versions response"; echo "$VERSIONS_JSON"; exit 1; }
 
           # Normalize to an array, then pick the first matching version id (if any)
           EXISTING_VERSION_ID=$(echo "$VERSIONS_JSON" | jq -r --arg NAME "$JIRA_VERSION" '
@@ -469,13 +495,17 @@ jobs:
 
           ISSUE_KEYS=$(git log --format='%s%n%b' $RANGE | grep -Eo '[A-Z][A-Z0-9]+-[0-9]+' | sort -u || true)
 
-          PROJECT_JSON=$(curl -s -u "$JIRA_USER_EMAIL:$JIRA_API_TOKEN" \
+          # -f: an HTTP error must stop here, not read as "no such version".
+          PROJECT_JSON=$(curl -fsS -u "$JIRA_USER_EMAIL:$JIRA_API_TOKEN" \
             -H 'Accept: application/json' "$JIRA_BASE_URL/rest/api/3/project/$JIRA_PROJECT_KEY")
           PROJECT_ID=$(echo "$PROJECT_JSON" | jq -r '.id // empty')
           [ -z "$PROJECT_ID" ] && echo "Failed to resolve project id" && echo "$PROJECT_JSON" && exit 1
 
-          VERSIONS_JSON=$(curl -s -u "$JIRA_USER_EMAIL:$JIRA_API_TOKEN" \
+          VERSIONS_JSON=$(curl -fsS -u "$JIRA_USER_EMAIL:$JIRA_API_TOKEN" \
             -H 'Accept: application/json' "$JIRA_BASE_URL/rest/api/3/project/$JIRA_PROJECT_KEY/versions")
+          # Unpaginated: every version, as an array. Anything else is an error.
+          echo "$VERSIONS_JSON" | jq -e 'type == "array"' >/dev/null \
+            || { echo "Unexpected Jira versions response"; echo "$VERSIONS_JSON"; exit 1; }
 
           # Normalize to an array, then pick the first matching version id (if any)
           EXISTING_VERSION_ID=$(echo "$VERSIONS_JSON" | jq -r --arg NAME "$JIRA_VERSION" '
