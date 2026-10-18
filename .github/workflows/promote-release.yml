@@ -38,6 +38,12 @@ env:
   SHIPPING_CONFIG: Debug   # the only build configuration that may be promoted
   TAG: ${{ inputs.tag }}
 
+# One promotion at a time: the Latest decision reads the current Latest and
+# then sets it, which two concurrent runs could interleave.
+concurrency:
+  group: promote-release
+  cancel-in-progress: false
+
 jobs:
   promote:
     runs-on: ubuntu-latest

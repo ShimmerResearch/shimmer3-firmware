@@ -137,6 +137,7 @@ jobs:
       - name: Upload image
         uses: actions/upload-artifact@v4
         with:
+          overwrite: true  # a re-run uploads under the same name
           name: firmware-txt-${{ github.sha }}
           path: ${{ env.IMAGE }}
           retention-days: 14
