@@ -18,8 +18,8 @@ void DMA0_init(uint16_t *srcAddr, uint16_t *destAddr, uint16_t size)
   //Writes a value to a 20-bit SFR register located at the given 16-bit address
   //__data16_write_addr((unsigned short) &DMA0SA,(unsigned long)srcAddr); //Source block address
   //__data16_write_addr((unsigned short) &DMA0DA,(unsigned long)destAddr); //Destination single address
-  DMA0SA = (__SFR_FARPTR) (unsigned long) srcAddr;
-  DMA0DA = (__SFR_FARPTR) (unsigned long) destAddr;
+  DMA_SET_ADDRESS(DMA0SA, srcAddr);
+  DMA_SET_ADDRESS(DMA0DA, destAddr);
 }
 
 void DMA0_repeatTransfer(uint16_t *srcAddr, uint16_t *destAddr, uint16_t size)
@@ -27,8 +27,8 @@ void DMA0_repeatTransfer(uint16_t *srcAddr, uint16_t *destAddr, uint16_t size)
   DMA0SZ = size;
   //__data16_write_addr((unsigned short) &DMA0SA,(unsigned long)srcAddr);
   //__data16_write_addr((unsigned short) &DMA0DA,(unsigned long) destAddr);
-  DMA0SA = (__SFR_FARPTR) (unsigned long) srcAddr;
-  DMA0DA = (__SFR_FARPTR) (unsigned long) destAddr;
+  DMA_SET_ADDRESS(DMA0SA, srcAddr);
+  DMA_SET_ADDRESS(DMA0DA, destAddr);
 }
 
 void DMA0_enable()
@@ -63,8 +63,8 @@ void DMA1_init(uint8_t *srcAddr, uint8_t *destAddr, uint16_t size)
   //Writes a value to a 20-bit SFR register located at the given 16-bit address
   //__data16_write_addr((unsigned short) &DMA0SA,(unsigned long)srcAddr); //Source block address
   //__data16_write_addr((unsigned short) &DMA0DA,(unsigned long)destAddr); //Destination single address
-  DMA1SA = (__SFR_FARPTR) (unsigned long) srcAddr;
-  DMA1DA = (__SFR_FARPTR) (unsigned long) destAddr;
+  DMA_SET_ADDRESS(DMA1SA, srcAddr);
+  DMA_SET_ADDRESS(DMA1DA, destAddr);
 }
 
 void DMA1_repeatTransfer(uint8_t *srcAddr, uint8_t *destAddr, uint16_t size)
@@ -72,8 +72,8 @@ void DMA1_repeatTransfer(uint8_t *srcAddr, uint8_t *destAddr, uint16_t size)
   DMA1SZ = size;
   //__data16_write_addr((unsigned short) &DMA0SA,(unsigned long)srcAddr);
   //__data16_write_addr((unsigned short) &DMA0DA,(unsigned long) destAddr);
-  DMA1SA = (__SFR_FARPTR) (unsigned long) srcAddr;
-  DMA1DA = (__SFR_FARPTR) (unsigned long) destAddr;
+  DMA_SET_ADDRESS(DMA1SA, srcAddr);
+  DMA_SET_ADDRESS(DMA1DA, destAddr);
 }
 
 void DMA1_enable()
@@ -104,8 +104,8 @@ void DMA2_init(uint16_t *srcAddr, uint16_t *destAddr, uint16_t size)
   DMA2CTL = DMADSTINCR_3 + DMASBDB + DMAIE + DMALEVEL; //block transfer, inc dst, inc src, Int enable
   //__data16_write_addr((unsigned short) &DMA2SA,(unsigned long) srcAddr);
   //__data16_write_addr((unsigned short) &DMA2DA,(unsigned long) destAddr);
-  DMA2SA = (__SFR_FARPTR) (unsigned long) srcAddr;
-  DMA2DA = (__SFR_FARPTR) (unsigned long) destAddr;
+  DMA_SET_ADDRESS(DMA2SA, srcAddr);
+  DMA_SET_ADDRESS(DMA2DA, destAddr);
 }
 
 void DMA2_repeatTransfer(uint16_t *srcAddr, uint16_t *destAddr, uint16_t size)
@@ -113,8 +113,8 @@ void DMA2_repeatTransfer(uint16_t *srcAddr, uint16_t *destAddr, uint16_t size)
   DMA2SZ = size;
   //__data16_write_addr((unsigned short) &DMA2SA,(unsigned long)srcAddr);
   //__data16_write_addr((unsigned short) &DMA2DA,(unsigned long) destAddr);
-  DMA2SA = (__SFR_FARPTR) (unsigned long) srcAddr;
-  DMA2DA = (__SFR_FARPTR) (unsigned long) destAddr;
+  DMA_SET_ADDRESS(DMA2SA, srcAddr);
+  DMA_SET_ADDRESS(DMA2DA, destAddr);
 }
 
 void DMA2_enable()

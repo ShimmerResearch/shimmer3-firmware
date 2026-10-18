@@ -40,6 +40,7 @@
                                                                                * @{
                                                                                ******************************************************************************/
 #include "hal_SDCard.h"
+#include "hal_DMA.h"
 #include "msp430.h"
 
 //Pins from MSP430 connected to the SD Card
@@ -142,10 +143,10 @@ void SDCard_readFrame(uint8_t *pBuffer, uint16_t size)
 void SDCard_readFrame_DMA(uint8_t *pBuffer, uint16_t size)
 {
   /* Source DMA address: the data buffer. */
-  __data16_write_addr((unsigned short) &DMA1SA, (unsigned long) &UCB1RXBUF);
+  DMA_SET_ADDRESS(DMA1SA, &UCB1RXBUF);
 
   /* Destination DMA address: the UART send register. */
-  __data16_write_addr((unsigned short) &DMA1DA, (unsigned long) pBuffer);
+  DMA_SET_ADDRESS(DMA1DA, pBuffer);
 
   /* The size of the block to be transferred */
   DMA1SZ = size;
@@ -268,10 +269,10 @@ void SDCard_sendFrame(uint8_t *pBuffer, uint16_t size)
 void SDCard_sendFrame_DMA(uint8_t *pBuffer, uint16_t size)
 {
   /* Source DMA address: the data buffer. */
-  __data16_write_addr((unsigned short) &DMA1SA, (unsigned long) pBuffer);
+  DMA_SET_ADDRESS(DMA1SA, pBuffer);
 
   /* Destination DMA address: the UART send register. */
-  __data16_write_addr((unsigned short) &DMA1DA, (unsigned long) &UCB1TXBUF);
+  DMA_SET_ADDRESS(DMA1DA, &UCB1TXBUF);
 
   /* DMA trigger is either:
    * DMA_REQ - TSEL_0

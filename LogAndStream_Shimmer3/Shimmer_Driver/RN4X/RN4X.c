@@ -2344,7 +2344,7 @@ void updateBtWriteFunctionPtr(void)
 
 void setBtRxFullResponsePtr(volatile char *ptr)
 {
-  btRxFullResponse = ptr;
+  btRxFullResponse = (char *) ptr;
 }
 
 uint8_t areBtStatusStringsEnabled(void)

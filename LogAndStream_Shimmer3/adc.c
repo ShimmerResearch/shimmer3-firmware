@@ -291,6 +291,10 @@ void SetBattDma(void)
               0);
   DMA0SZ = 1; //DMA0 size
 
+  //Plain assignments rather than DMA_SET_ADDRESS() (hal_DMA.h explains the
+  //#173 it suppresses), so the three DMA0SA stores still compile to one.
+#pragma diag_push
+#pragma diag_suppress 173
   if (storedConfigPtr->chEnVBattery)
   {
     if (storedConfigPtr->chEnLnAccel)
@@ -309,6 +313,7 @@ void SetBattDma(void)
 
   //Writes a value to a 20-bit SFR register located at the given16/20-bit address
   DMA0DA = (__SFR_FARPTR) (unsigned long) battVal;
+#pragma diag_pop
 
   DMA0_transferDoneFunction(&Dma0BatteryRead);
 

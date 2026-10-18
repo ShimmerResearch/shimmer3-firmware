@@ -454,7 +454,6 @@ void I2C_pollSensors(void)
 
   //needs to be static to carry sample forward between samples
   static uint8_t icm20948MagBuf[ICM_MAG_RD_SIZE] = { 0 };
-  uint8_t icm20948MagRdy = 0;
   if (storedConfigPtr->chEnAltMag
       || (ShimBrd_isWrAccelInUseIcm20948() && storedConfigPtr->chEnMag))
   {
@@ -463,10 +462,9 @@ void I2C_pollSensors(void)
       /* This system tries to avoid lock-up scenario in the ICM20948 Mag
        * (AK09916) in-which we see a 0.1 ms worth of repeated data samples
        * if the chip was being read from too often. */
-      if (icm20948MagRdy = ICM20948_hasTimeoutPeriodPassed(packetBufPtr->timestampTicks))
+      if (ICM20948_hasTimeoutPeriodPassed(packetBufPtr->timestampTicks))
       {
-        icm20948MagRdy = ICM20948_getMagAndStatus(
-            packetBufPtr->timestampTicks, &icm20948MagBuf[0]);
+        ICM20948_getMagAndStatus(packetBufPtr->timestampTicks, &icm20948MagBuf[0]);
       }
     }
     else
@@ -475,7 +473,7 @@ void I2C_pollSensors(void)
        * before reading the remaining bytes. This approach was found to
        * work fine <512Hz but after that it would cause packet loss due
        * to the length of time the I2C operations take to finish. */
-      if (icm20948MagRdy = ICM20948_isMagDataRdy())
+      if (ICM20948_isMagDataRdy())
       {
         ICM20948_getMag(&icm20948MagBuf[1]);
       }
