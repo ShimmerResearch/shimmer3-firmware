@@ -53,6 +53,9 @@ env:
 
 # One release build at a time: two concurrent runs would read the same
 # version.txt and bump, tag and publish the same version.
+# GitHub holds one run waiting behind the running one; a third dispatch
+# replaces the waiting run, which then shows as cancelled in Actions.
+# Start the next run only after the last has finished.
 concurrency:
   group: build-release-firmware
   cancel-in-progress: false
