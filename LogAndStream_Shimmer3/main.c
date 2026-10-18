@@ -94,6 +94,7 @@ void BlinkTimerStart(void);
 void BlinkTimerStop(void);
 void SampleTimerStart(void);
 void SampleTimerStop(void);
+uint16_t SampleTimerNextCompare(uint16_t compare);
 char *HAL_GetUID(void);
 uint8_t checkIfBattReadNeeded(void);
 void BtStartDone();
@@ -697,7 +698,7 @@ __interrupt void TIMER0_B1_ISR(void)
       break; //No interrupt
     case 2:  //TB0CCR1
       //MPU9150 mag
-      TB0CCR1 = GetTB0() + ShimConfig_getStoredConfig()->samplingRateTicks;
+      TB0CCR1 = SampleTimerNextCompare(TB0CCR1);
       if (ShimTask_set(TASK_SAMPLE_MPU9150_MAG))
       {
         __bic_SR_register_on_exit(LPM3_bits);
@@ -705,7 +706,7 @@ __interrupt void TIMER0_B1_ISR(void)
       break;
     case 4: //TB0CCR2
       //Bmp180 press
-      TB0CCR2 = GetTB0() + ShimConfig_getStoredConfig()->samplingRateTicks;
+      TB0CCR2 = SampleTimerNextCompare(TB0CCR2);
       if (ShimTask_set(TASK_SAMPLE_BMPX80_PRESS))
       {
         __bic_SR_register_on_exit(LPM3_bits);
@@ -932,12 +933,33 @@ void SampleTimerStop(void)
   TB0CCTL2 &= ~CCIE;
 }
 
+/* The next compare for a TB0 channel that fires once a sample period (CCR0,
+ * and the CCR1/CCR2 pre-sample starts). It counts on from the compare that just
+ * fired, not from the counter, so interrupt latency no longer stretches the
+ * period: before DEV-1222 each ACLK tick (30.5 us) the interrupt ran late was
+ * added to it, about 3% per tick at 1024 Hz. It also keeps the pre-sample
+ * channels at their offset from CCR0. If the interrupt ran so late that the
+ * next compare is already due, the ones missed are skipped in phase: a compare
+ * at or behind the counter would not fire until TB0 wraps, 2 s later. */
+uint16_t SampleTimerNextCompare(uint16_t compare)
+{
+  uint16_t period = ShimConfig_getStoredConfig()->samplingRateTicks;
+  uint16_t now = GetTB0();
+
+  compare += period;
+  /* At least 2 ticks ahead, so the counter can't reach it before it's written */
+  while (period != 0U && (uint16_t) (compare - now - 2U) >= period)
+  {
+    compare += period;
+  }
+  return compare;
+}
+
 #pragma vector = TIMER0_B0_VECTOR
 
 __interrupt void TIMER0_B0_ISR(void)
 {
-  uint16_t timer_b0 = GetTB0();
-  TB0CCR0 = timer_b0 + ShimConfig_getStoredConfig()->samplingRateTicks;
+  TB0CCR0 = SampleTimerNextCompare(TB0CCR0);
 
   if (ShimSens_sampleTimerTriggered())
   {
