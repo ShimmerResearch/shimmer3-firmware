@@ -875,7 +875,7 @@ void SampleTimerStart(void)
         {
           TB0CCR0 = baseClockOffset + clk_90; //9ms
           TB0CCR1 = baseClockOffset;
-          TB0CCR2 = bmpX80SamplingTimeDiffFrom9msInTicks;
+          TB0CCR2 = baseClockOffset + bmpX80SamplingTimeDiffFrom9msInTicks;
           TB0CCTL1 = CCIE;
         }
         else
