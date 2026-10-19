@@ -52,14 +52,15 @@ tests, sign-off list — is
 
 ## Release
 CI only: `build-release-firmware.yml` via **workflow_dispatch** (major/minor/patch, Release/Debug).
-It publishes a **pre-release candidate**, run from a branch (`dry_run` only builds). `promote-release.yml`, given the tag, makes it public once the release gate passes (`Test/hil/hil_gate.py` over the attached `hil-report*.json`), and only a `Debug` build.
+It publishes a **pre-release candidate**, run from a branch (`dry_run` only builds). `promote-release.yml`, given the tag, makes it public once the release gate passes (`Test/hil/hil_gate.py` over the attached `hil-report*.json`), and only a `Release` build.
 The push trigger is commented out on purpose, so releases are never accidental. `FirmwareIdentifierList.txt`
 is the firmware identifier registry — keep it in step when adding a build.
 
-**Releases are built from the `Debug` configuration**, and the release workflow's `build_mode`
-input defaults to `Debug`. `Release` has the same settings except `-O2 --opt_for_speed=2` (Debug is
-`-O0`): it is the DEV-1217 candidate and does not ship until it has passed the bench procedure. When a
-change touches interrupt handlers, the Bluetooth data path or the I2C wait, bench Release as well.
+**Releases are built from the `Release` configuration**, and the release workflow's `build_mode`
+input defaults to `Release`; it refuses a candidate from Debug. `Release` is `-O2 --opt_for_speed=2`
+(DEV-1217) and `Debug` has the same settings at `-O0`; releases up to v1.01.006 shipped from Debug.
+The first Release-built candidate needs the full bench procedure before it is promoted. When a change
+touches interrupt handlers, the Bluetooth data path or the I2C wait, bench Release specifically.
 Change project settings under *[All configurations]* so the two stay in step. See `log-and-stream-common/docs/SHIMMER3_BUILD_AND_PROGRAMMING.md` §4.2.
 
 `clang-format-check.yml` runs on every push with `inplace: True` and commits the reformatted result
