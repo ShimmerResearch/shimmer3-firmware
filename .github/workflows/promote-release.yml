@@ -35,7 +35,7 @@ env:
   JIRA_VERSION_PREFIX: 'L&S_S3_v'   # note the quotes due to &
   SUBMODULE_FOLDER: log-and-stream-common
   SUBMODULE_REPO: ShimmerResearch/log-and-stream-common
-  SHIPPING_CONFIG: Debug   # the only build configuration that may be promoted
+  SHIPPING_CONFIG: Release # the only build configuration that may be promoted
   TAG: ${{ inputs.tag }}
 
 # One promotion at a time: the Latest decision reads the current Latest and
