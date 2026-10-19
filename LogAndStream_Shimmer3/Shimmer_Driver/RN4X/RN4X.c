@@ -2066,9 +2066,13 @@ void BT_rtsInterrupt(uint8_t value)
 
   if (txOverflow)
   { //in disabling sending
+    /* Pause the TX chain rather than end it: a byte can still be waiting in
+     * UCA1TXBUF behind the one being shifted out. Left in progress, nothing
+     * else starts a transfer, and the TX interrupt re-enabled below takes the
+     * chain on once that byte has gone. Marked idle here, a pulse on RTS
+     * shorter than two characters let the resume write over that byte. */
     txie_reg = UCA1IE & UCTXIE;
     UCA1IE &= ~UCTXIE;
-    ShimBt_btTxInProgressSet(0); //false
   }
   else
   { //in resuming sending
