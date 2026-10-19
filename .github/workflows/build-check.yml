@@ -3,8 +3,9 @@
 # breaks the firmware build fails here, in review, instead of in the release
 # workflow after a version has been bumped and tagged.
 #
-# Builds the configuration that ships - Debug on Shimmer3. Release has the
-# same settings until DEV-1217 raises its optimisation (log-and-stream-common
+# Builds the configuration that ships - Debug on Shimmer3. Release is the
+# same apart from -O2 --opt_for_speed=2, the DEV-1217 candidate, and is not
+# built here (log-and-stream-common
 # docs/SHIMMER3_BUILD_AND_PROGRAMMING.md §4.2) - with the same Code Composer
 # Studio version and install steps as build-release-firmware.yml, and the same
 # cache key, so the two share one CCS install.

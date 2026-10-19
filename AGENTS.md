@@ -57,9 +57,10 @@ The push trigger is commented out on purpose, so releases are never accidental. 
 is the firmware identifier registry — keep it in step when adding a build.
 
 **Releases are built from the `Debug` configuration**, and the release workflow's `build_mode`
-input defaults to `Debug`. `Release` has the same settings and builds the same image, until DEV-1217
-raises its optimisation after bench testing. Change project settings under *[All configurations]* so
-the two stay in step. See `log-and-stream-common/docs/SHIMMER3_BUILD_AND_PROGRAMMING.md` §4.2.
+input defaults to `Debug`. `Release` has the same settings except `-O2 --opt_for_speed=2` (Debug is
+`-O0`): it is the DEV-1217 candidate and does not ship until it has passed the bench procedure. When a
+change touches interrupt handlers, the Bluetooth data path or the I2C wait, bench Release as well.
+Change project settings under *[All configurations]* so the two stay in step. See `log-and-stream-common/docs/SHIMMER3_BUILD_AND_PROGRAMMING.md` §4.2.
 
 `clang-format-check.yml` runs on every push with `inplace: True` and commits the reformatted result
 back, so a badly formatted push is fixed on your branch rather than rejected. **Pull before your next
