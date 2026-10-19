@@ -959,7 +959,19 @@ uint16_t SampleTimerNextCompare(uint16_t compare)
 
 __interrupt void TIMER0_B0_ISR(void)
 {
-  TB0CCR0 = SampleTimerNextCompare(TB0CCR0);
+  /* SampleTimerNextCompare(), inlined so the sample starts as soon after the
+   * compare as before DEV-1222. The call put 34 cycles ahead of the trigger,
+   * which cost the RN42 9.8% of its packets under 1024 Hz overload (DEV-1150
+   * timing sensitivity). It's still called to catch up after a late ISR. */
+  uint16_t timer_b0 = GetTB0();
+  uint16_t period = ShimConfig_getStoredConfig()->samplingRateTicks;
+  uint16_t compare = TB0CCR0 + period;
+
+  if ((uint16_t) (compare - timer_b0 - 2U) >= period)
+  {
+    compare = SampleTimerNextCompare(TB0CCR0);
+  }
+  TB0CCR0 = compare;
 
   if (ShimSens_sampleTimerTriggered())
   {
