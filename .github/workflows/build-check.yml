@@ -3,13 +3,19 @@
 # breaks the firmware build fails here, in review, instead of in the release
 # workflow after a version has been bumped and tagged.
 #
-# Builds the configuration that ships - Debug on Shimmer3. Release has the
-# same settings until DEV-1217 raises its optimisation (log-and-stream-common
-# docs/SHIMMER3_BUILD_AND_PROGRAMMING.md §4.2) - with the same Code Composer
-# Studio version and install steps as build-release-firmware.yml, and the same
-# cache key, so the two share one CCS install.
+# Builds both CCS configurations, one matrix leg each. Debug is the one that
+# ships on Shimmer3. Release is the same apart from -O2 --opt_for_speed=2, the
+# DEV-1217 candidate (log-and-stream-common
+# docs/SHIMMER3_BUILD_AND_PROGRAMMING.md §4.2). It is built here because,
+# before DEV-1217, nothing built it, and it went stale until it no longer
+# compiled. Building it does not change what ships: build-release-firmware.yml
+# and promote-release.yml still release Debug only.
 #
-# This is the build that sees a 16-bit int. The host tests compile with a
+# Both legs use the same Code Composer Studio version and install steps as
+# build-release-firmware.yml, and the same cache key, so all of them share one
+# CCS install.
+#
+# These are the builds that see a 16-bit int. The host tests compile with a
 # 32-bit int, so an overflow on the MSP430 is caught here or nowhere.
 #
 # WHAT THIS DOES NOT COVER: the other platform. log-and-stream-common is also a
@@ -33,7 +39,6 @@ concurrency:
 env:
   PROJECT_NAME: LogAndStream_Shimmer3
   PROJECT_DIR: LogAndStream_Shimmer3
-  BUILD_CONFIG: Debug
   SUBMODULE_FOLDER: log-and-stream-common
   CCS_VERSION: 12.8.1.00005
   CCS_INSTALL_DIR: /opt/ti/ccs
@@ -51,6 +56,14 @@ jobs:
 
   build:
     runs-on: ubuntu-22.04
+    strategy:
+      # A failure in one configuration does not cancel the other, so a
+      # Release-only failure is seen alongside the Debug result.
+      fail-fast: false
+      matrix:
+        config: [Debug, Release]
+    env:
+      BUILD_CONFIG: ${{ matrix.config }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -138,6 +151,6 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           overwrite: true  # a re-run uploads under the same name
-          name: firmware-txt-${{ github.sha }}
+          name: firmware-txt-${{ matrix.config }}-${{ github.sha }}
           path: ${{ env.IMAGE }}
           retention-days: 14

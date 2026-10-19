@@ -20,8 +20,9 @@ on:
           - major
           - minor
           - patch
-      # Releases ship from Debug. Release builds the same image until DEV-1217 raises
-      # its optimisation - see log-and-stream-common docs/SHIMMER3_BUILD_AND_PROGRAMMING.md §4.2.
+      # Releases ship from Debug (-O0). Release is -O2 --opt_for_speed=2, the DEV-1217
+      # candidate, and ships only once it has passed the bench procedure - see
+      # log-and-stream-common docs/SHIMMER3_BUILD_AND_PROGRAMMING.md §4.2.
       build_mode:
         description: "Build configuration (releases ship from Debug):"
         required: true
