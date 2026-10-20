@@ -47,10 +47,13 @@
 #include "msp430.h"
 #include <stdint.h>
 
+#include "../RN4X/RN4X.h"
+
 //returns 1 if successful, 0 if failure
 uint8_t InfoMem_write(uint16_t addr, uint8_t *buf, uint16_t size)
 {
   uint8_t ie, i, tempsize = 0, segoffset, tempbuf[INFOMEM_SEG_SIZE];
+  uint8_t btWasClearToSend;
   uint16_t written = 0;
 
   uint32_t infomemaddr = addr + INFOMEM_OFFSET_MSP430;
@@ -67,6 +70,13 @@ uint8_t InfoMem_write(uint16_t addr, uint8_t *buf, uint16_t size)
   {
     __disable_interrupt();
   }
+  //Each segment erase holds the CPU until it completes, as erases started
+  //from flash do (SLAU208, Flash Memory Controller, "Erasing Flash Memory"),
+  //for up to tSEG_ERASE = 32 ms each (MSP430F5437A datasheet, Flash Memory);
+  //a SET_INFOMEM over Bluetooth spends 125-156 ms in here on the bench.
+  //Nothing services the BT RX DMA in that time, so hold the radio off the
+  //UART for it.
+  btWasClearToSend = BT_rxPause();
 
   FCTL3 = FWKEY; //Clear Lock bit
   if (infomemaddr < INFOMEM_SEG_C_ADDR_MSP430)
@@ -193,6 +203,7 @@ uint8_t InfoMem_write(uint16_t addr, uint8_t *buf, uint16_t size)
     FCTL3 = FWKEY + LOCK + LOCKA; //Set LOCK and LOCKA bits
   }
 
+  BT_rxResume(btWasClearToSend);
   if (ie)
   {
     __enable_interrupt();
@@ -216,6 +227,16 @@ uint8_t InfoMem_read(uint16_t addr, uint8_t *buf, uint16_t size)
 
 void InfoMem_erase(uint8_t segments)
 {
+  uint8_t ie, btWasClearToSend;
+
+  //As in InfoMem_write(): interrupts off while erasing (TI's 5xx workaround),
+  //and the radio held off the UART while the erases hold the CPU
+  if (ie = (__get_SR_register() & GIE)) //interrupts enabled?
+  {
+    __disable_interrupt();
+  }
+  btWasClearToSend = BT_rxPause();
+
   FCTL3 = FWKEY; //Clear Lock bit
 
   if (segments & INFOMEM_SEG_D)
@@ -251,6 +272,12 @@ void InfoMem_erase(uint8_t segments)
   else
   {
     FCTL3 = FWKEY + LOCK + LOCKA; //Set LOCK and LOCKA bits
+  }
+
+  BT_rxResume(btWasClearToSend);
+  if (ie)
+  {
+    __enable_interrupt();
   }
 }
 
