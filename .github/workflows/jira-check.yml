@@ -1,0 +1,56 @@
+# Run by hand to check that the Jira secrets work, without cutting a release.
+#
+# The release workflow's "Link GitHub release to Jira" step uses the same three
+# secrets, but it runs only at the end of a release build and hides Jira's
+# reply, so a dead token shows up as a bare "curl: (22) ... 404" on release day.
+# This calls Jira the same way (basic auth, site URL) and says what came back.
+#
+# This file is identical in shimmer3-firmware and shimmer3r-firmware.
+name: jira-check
+
+on: workflow_dispatch
+
+permissions:
+  contents: read
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    env:
+      JIRA_BASE_URL: ${{ secrets.JIRA_BASE_URL }}
+      JIRA_USER_EMAIL: ${{ secrets.JIRA_USER_EMAIL }}
+      JIRA_API_TOKEN: ${{ secrets.JIRA_API_TOKEN }}
+      JIRA_PROJECT_KEY: DEV
+    steps:
+      - name: Check Jira credentials
+        run: |
+          set -uo pipefail
+          FAILED=0
+          BODY=$(mktemp)
+
+          check() {
+            local label="$1" path="$2" code
+            code=$(curl -s -o "$BODY" -w '%{http_code}' \
+              -u "$JIRA_USER_EMAIL:$JIRA_API_TOKEN" \
+              -H 'Accept: application/json' "$JIRA_BASE_URL/rest/api/3/$path")
+            echo "$label: HTTP $code"
+            if [ "$code" = "200" ]; then
+              jq -r '"  " + (.displayName // .name // "ok")' "$BODY" 2>/dev/null || true
+            else
+              FAILED=1
+            fi
+          }
+
+          check "who the token belongs to" "myself"
+          check "project $JIRA_PROJECT_KEY" "project/$JIRA_PROJECT_KEY"
+
+          if [ "$FAILED" != 0 ]; then
+            echo
+            echo "A 401 or 404 means Jira did not accept the token. Check that:"
+            echo "  - the token has not expired (id.atlassian.com > Security > API tokens);"
+            echo "  - it is an unscoped token, since a scoped one is refused at the site URL;"
+            echo "  - JIRA_USER_EMAIL is the account that owns it;"
+            echo "  - JIRA_BASE_URL is the site root, https://<site>.atlassian.net."
+            exit 1
+          fi
