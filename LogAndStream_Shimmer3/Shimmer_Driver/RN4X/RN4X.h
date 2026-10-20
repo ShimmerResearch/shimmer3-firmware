@@ -397,6 +397,8 @@ void setDmaWaitingForResponse(uint16_t numChars);
 void setDmaWaitForReturnNewLine(void);
 void DMA2AndCtsDisable(void);
 void setIsBtClearToSend(uint8_t isBtClearToSend);
+uint8_t BT_rxPause(void);
+void BT_rxResume(uint8_t wasClearToSend);
 void setBtRtsInterruptState(uint8_t isEnabled);
 void setBtConnectionStatusInterruptIsEnabled(uint8_t isEnabled);
 void updateBtConnectionStatusInterruptDirection(void);

@@ -2195,6 +2195,39 @@ void setIsBtClearToSend(uint8_t isBtClearToSend)
   }
 }
 
+/* Hold the radio off the UART for a section that cannot service the RX DMA,
+ * such as a flash erase or write. Between commands the DMA is armed for one
+ * byte and CTS stays asserted until its ISR runs, so in such a section a byte
+ * completes the DMA, the next waits in UCA1RXBUF and every one after that
+ * overruns it. On an RN4678 those bytes include status strings such as
+ * "%CONN_PARAM,...%", and a status string that loses its middle takes the
+ * next command's header with it. With CTS deasserted the module
+ * holds its bytes instead; the one already in flight still lands in the DMA
+ * or in UCA1RXBUF.
+ *
+ * Call with interrupts disabled, so no ISR can re-assert CTS before
+ * BT_rxResume(). Returns whether CTS was asserted, for BT_rxResume(). */
+uint8_t BT_rxPause(void)
+{
+  uint8_t wasClearToSend = !(P2OUT & BIT2);
+
+  setIsBtClearToSend(0);
+  return wasClearToSend;
+}
+
+/* Undo BT_rxPause(), still with interrupts disabled. CTS is asserted again
+ * only if the DMA is still armed. If a byte completed it during the section,
+ * the channel has disabled itself (single transfer mode clears DMAEN once
+ * DMAxSZ transfers are done - SLAU208, DMA Controller, "Single Transfer") and
+ * the pending DMA ISR decides when to accept more, as it does outside one. */
+void BT_rxResume(uint8_t wasClearToSend)
+{
+  if (wasClearToSend && (DMA2CTL & DMAEN))
+  {
+    setIsBtClearToSend(1);
+  }
+}
+
 //RADIO_RTS interrupt: RTS raises when BT has trans overflow
 void setBtRtsInterruptState(uint8_t isEnabled)
 {
