@@ -488,11 +488,13 @@ void I2C_pollSensors(void)
       dataBufPtr[sensing.ptr.accel2 + 0U] = icm20948AccelGyroBuf[1U];
       dataBufPtr[sensing.ptr.accel2 + 1U] = icm20948AccelGyroBuf[0U];
 
-      //Invert sign of uncalibrated Y-axis to match LSM303 chip placement
+      //Invert sign of uncalibrated Y-axis to match LSM303 chip placement.
+      //The ICM20948 register is big-endian (YOUT_H first); the result is
+      //written little-endian like X and Z (DEV-1298).
       int16_t signInvertBuffer
-          = -((int16_t) ((icm20948AccelGyroBuf[3U] << 8) | icm20948AccelGyroBuf[2U]));
-      dataBufPtr[sensing.ptr.accel2 + 2U] = (signInvertBuffer >> 8) & 0xFF;
-      dataBufPtr[sensing.ptr.accel2 + 3U] = signInvertBuffer & 0xFF;
+          = -((int16_t) ((icm20948AccelGyroBuf[2U] << 8) | icm20948AccelGyroBuf[3U]));
+      dataBufPtr[sensing.ptr.accel2 + 2U] = signInvertBuffer & 0xFF;
+      dataBufPtr[sensing.ptr.accel2 + 3U] = (signInvertBuffer >> 8) & 0xFF;
 
       dataBufPtr[sensing.ptr.accel2 + 4U] = icm20948AccelGyroBuf[5U];
       dataBufPtr[sensing.ptr.accel2 + 5U] = icm20948AccelGyroBuf[4U];
