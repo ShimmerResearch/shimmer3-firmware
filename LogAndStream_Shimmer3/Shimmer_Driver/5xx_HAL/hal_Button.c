@@ -85,12 +85,3 @@ void Button_waitrelease()
 {
   P1IES &= ~BIT6; //select rising edge trigger
 }
-
-void Button_debounce()
-{
-  //disable switch interrupts
-  Button_interruptDisable();
-  //start timer to reenable switch after 250ms
-  msp430_clock_init();
-  msp430_register_timer_cb(Button_interruptEnable, 500, 0);
-}
