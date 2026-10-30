@@ -91,7 +91,7 @@
 
 
 #define	_USE_LFN	1		/* 0 to 3 */
-#define	_MAX_LFN	255		/* Maximum LFN length to handle (12 to 255) */
+#define	_MAX_LFN	64		/* Maximum LFN length to handle (12 to 255) */
 /* The _USE_LFN option switches the LFN support.
 /
 /   0: Disable LFN feature. _MAX_LFN and _LFN_UNICODE have no effect.
@@ -103,6 +103,11 @@
 /  Unicode handling functions ff_convert() and ff_wtoupper() must be added
 /  to the project. When enable to use heap, memory control functions
 /  ff_memalloc() and ff_memfree() must be added to the project. */
+
+/* Shimmer3: _MAX_LFN is 64, not 255. The working buffer is static, two bytes
+/  per character, and RAM is short; the longest name the firmware creates is
+/  23 characters (log-and-stream-common docs/SHIMMER3_SD_CARD_FORMAT.md 1.4).
+/  The data file code also puts an lfn[_MAX_LFN + 1] on the stack. */
 
 
 #define	_LFN_UNICODE	0	/* 0:ANSI/OEM or 1:Unicode */

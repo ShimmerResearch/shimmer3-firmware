@@ -47,6 +47,5 @@ extern void Button_interruptEnable();
 extern void Button_interruptDisable();
 extern void Button_waitpress();
 extern void Button_waitrelease();
-extern void Button_debounce();
 
 #endif /* HAL_BUTTON_H */

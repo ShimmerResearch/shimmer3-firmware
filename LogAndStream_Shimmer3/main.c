@@ -546,12 +546,15 @@ __interrupt void Port1_ISR(void)
 
       //BUTTON_SW1
     case P1IV_P1IFG6:
-      if (ShimBtn_pressReleaseAction())
-      {
-        __bic_SR_register_on_exit(LPM3_bits);
-      }
-
-      if (shimmerStatus.buttonPressed)
+    {
+      /* The edge just taken is the one P1IES was armed for: the button is
+       * active low, so falling is a press. The pin is not read here - by now
+       * it may already have moved on. The opposite edge is armed first; if the
+       * button has already moved back, that write can set P1IFG6 (family user
+       * guide, PxIES) and the edge comes in as another interrupt. If it does
+       * not, the main loop puts the missed edge back. */
+      uint8_t isPress = (P1IES & BIT6) ? 1U : 0U;
+      if (isPress)
       {
         Button_waitrelease();
       }
@@ -559,7 +562,12 @@ __interrupt void Port1_ISR(void)
       {
         Button_waitpress();
       }
-      break;
+      if (ShimEvt_isrPushButtonEdge(isPress))
+      {
+        __bic_SR_register_on_exit(LPM3_bits);
+      }
+    }
+    break;
     default:
       break;
   }
