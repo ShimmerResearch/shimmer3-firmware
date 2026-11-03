@@ -42,19 +42,6 @@ void TA0_stop(uint8_t user)
   __set_interrupt_state(gie);
 }
 
-/* TA0R runs from ACLK, not the CPU clock, so a single read can catch it
- * changing: read until two agree. Called with interrupts off. */
-static uint16_t readTa0(void)
-{
-  uint16_t t0, t1 = TA0R;
-  do
-  {
-    t0 = t1;
-    t1 = TA0R;
-  } while (t0 != t1);
-  return t1;
-}
-
 void Board_evtTtlArm(uint8_t enable)
 {
   if (enable)
@@ -94,6 +81,14 @@ void Board_evtTtlArm(uint8_t enable)
   }
 }
 
+/* Interrupt context. P1.5 keeps its pull-down and Timer_A0 keeps running; the
+ * next Board_evtTtlArm(1) rewrites TA0CCTL4 and works the edge direction out
+ * afresh. */
+void Board_evtTtlPause(void)
+{
+  TA0CCTL4 &= ~CCIE;
+}
+
 uint8_t Board_evtTtlLevel(void)
 {
   return (P1IN & BIT5) ? 1U : 0U;
@@ -103,7 +98,9 @@ uint8_t TA0_captureIsr(void)
 {
   uint16_t cctl = TA0CCTL4;
   uint16_t ccr = TA0CCR4;
-  uint16_t tar = readTa0();
+  /* TA0R runs from ACLK, not the CPU clock: GetTA0() reads it until two reads
+   * agree */
+  uint16_t tar = GetTA0();
   uint64_t now = RTC_get64();
   uint8_t flags = EVT_FLAG_HW_CAPTURE;
   uint8_t level;

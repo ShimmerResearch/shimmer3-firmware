@@ -16,6 +16,7 @@ void TA0_stop(uint8_t user);
 uint8_t TA0_captureIsr(void);
 
 void Board_evtTtlArm(uint8_t enable);
+void Board_evtTtlPause(void);
 uint8_t Board_evtTtlLevel(void);
 
 #endif /* HAL_TA0_H_ */
