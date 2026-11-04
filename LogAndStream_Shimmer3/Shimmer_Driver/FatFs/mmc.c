@@ -12,7 +12,9 @@
 ---------------------------------------------------------------------------*/
 
 #include <intrinsics.h>         /* Include MSP430-specific intrincs */
+#include <string.h>
 #include "diskio.h"             /* Common include file for FatFs and disk I/O layer */
+#include "mmc.h"
 #include "../5xx_HAL/hal_SDCard.h"         /* MSP-EXP430F5529 specific SD Card driver */
 
 /*-------------------------------------------------------------------------*/
@@ -281,6 +283,43 @@ BYTE send_cmd (        /* Returns command response (bit7==1:Send failed)*/
 
 
 
+/*-----------------------------------------------------------------------*/
+/* Shimmer: keep the card's CID and size for the factory test report     */
+/*-----------------------------------------------------------------------*/
+
+/* Read at each initialisation (DEV-1405). A docked Shimmer3 cannot reach its
+ * card, so the factory test prints this copy rather than reading the card. */
+static BYTE CardId[16];
+static DWORD CardSectors;
+static BYTE CardIdState = MMC_CARD_ID_NOT_READ;
+
+static
+int read_card_id (void)    /* 1:OK, 0:Failed */
+{
+    BYTE n, csd[16];
+    DWORD cs;
+    int ok = 0;
+
+
+    if ((send_cmd(CMD10, 0) == 0) && rcvr_datablock(CardId, 16)    /* SEND_CID */
+        && (send_cmd(CMD9, 0) == 0) && rcvr_datablock(csd, 16)) {   /* SEND_CSD */
+        if ((csd[0] >> 6) == 1) {    /* CSD 2.0: C_SIZE is 22 bits, in units of 1024 sectors */
+            cs = ((DWORD)(csd[7] & 0x3F) << 16) + ((DWORD)csd[8] << 8) + csd[9] + 1;
+            CardSectors = cs << 10;
+        } else {                    /* CSD 1.0, as disk_ioctl() decodes it */
+            n = (csd[5] & 15) + ((csd[10] & 128) >> 7) + ((csd[9] & 3) << 1) + 2;
+            cs = (csd[8] >> 6) + ((WORD)csd[7] << 2) + ((WORD)(csd[6] & 3) << 10) + 1;
+            CardSectors = cs << (n - 9);
+        }
+        ok = 1;
+    }
+    deselect();
+
+    return ok;
+}
+
+
+
 /*--------------------------------------------------------------------------
 
    Public Functions
@@ -346,6 +385,7 @@ DSTATUS disk_initialize (
 
     DLY_US(100);
 
+    CardIdState = MMC_CARD_ID_FAILED;    /* until this initialisation reads it */
     s = disk_status(drv);        /* Check if card is in the socket */
     if (s & STA_NODISK) return s;
 
@@ -391,6 +431,8 @@ DSTATUS disk_initialize (
         s |= STA_NOINIT;
     }
     Stat = s;
+
+    CardIdState = (ty && read_card_id()) ? MMC_CARD_ID_READ : MMC_CARD_ID_FAILED;
 
 
     return s;
@@ -603,4 +645,14 @@ void run_mmc_detectsd(unsigned char detect){
 		INS = 1;
 	else
 		INS = 0;
+}
+
+uint8_t mmc_getCardId(uint8_t *cid, uint32_t *sectors)
+{
+  if (CardIdState == MMC_CARD_ID_READ)
+  {
+    memcpy(cid, CardId, sizeof(CardId));
+    *sectors = CardSectors;
+  }
+  return CardIdState;
 }
