@@ -12,9 +12,11 @@
 #include "msp430.h"
 
 #include "../../i2c.h"
+#include "../FatFs/mmc.h"
 
 #include "shimmer_driver_include.h"
 
+#include "SDCard/shimmer_sd_card_id.h"
 #include "log_and_stream_externs.h"
 #include "shimmer_definitions.h"
 #include "version.h"
@@ -229,6 +231,36 @@ void led_test(void)
   WDTCTL = WDTPW + WDTSSEL__ACLK + WDTCNTCL + WDTIS_4;
 }
 
+/* Prints the card's identity lines from the CID the SD driver read when it
+ * last initialised the card. log-and-stream-common formats them
+ * (SDCard/shimmer_sd_card_id.h), so Shimmer3 and Shimmer3R print the same
+ * lines (DEV-1405). A docked Shimmer3 cannot reach its card, so docked this is
+ * the copy from the last undock, or from an undocked boot. */
+static void sd_card_report_cid(void)
+{
+  uint8_t raw[SD_CID_LEN];
+  uint32_t sectors;
+  uint8_t i;
+
+  switch (mmc_getCardId(raw, &sectors))
+  {
+    case MMC_CARD_ID_READ:
+      for (i = 0; ShimSdCardId_reportLine(buffer, i, raw, sectors); i++)
+      {
+        ShimFactoryTest_sendReport(buffer);
+      }
+      break;
+    case MMC_CARD_ID_FAILED:
+      ShimSdCardId_unavailableLine(buffer, "card not initialised");
+      ShimFactoryTest_sendReport(buffer);
+      break;
+    default:
+      ShimSdCardId_unavailableLine(buffer, "not read since boot, undock to read it");
+      ShimFactoryTest_sendReport(buffer);
+      break;
+  }
+}
+
 void sd_card_test(void)
 {
   uint8_t sdWasOff = 0;
@@ -244,6 +276,7 @@ void sd_card_test(void)
 
     if (P2IN & BIT3)
     {
+      sd_card_report_cid();
       ShimFactoryTest_sendReport(
           " - FAIL: Shimmer is docked so SD card test can not be "
           "performed\r\n");
@@ -267,6 +300,9 @@ void sd_card_test(void)
           Board_setSdPower(0);
         }
       }
+      /* After the read/write test: its first access since the card was last
+       * mounted initialises it, so the lines are this card's */
+      sd_card_report_cid();
       sprintf(buffer, " - %s: SD card read/write test\r\n",
           shimmerStatus.sdBadFile ? "FAIL" : "PASS");
       ShimFactoryTest_sendReport(buffer);
