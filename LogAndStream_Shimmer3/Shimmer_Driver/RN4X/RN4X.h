@@ -299,6 +299,8 @@ void BT_resetBaudRate(void);
 void BT_setGoodCommand(void);
 //TASK_BT_CMD_STEP: runs the step that BT_setGoodCommand() queued
 void BT_runCommandStep(void);
+//runs a queued TASK_BT_CMD_STEP from a wait outside the task loop (boot)
+void BT_runQueuedCommandStep(void);
 uint8_t areBtSetupCommandsRunning(void);
 
 uint8_t isBtModuleOverflowPinHigh(void);

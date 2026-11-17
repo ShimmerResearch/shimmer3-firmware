@@ -1539,6 +1539,20 @@ void BT_runCommandStep(void)
   }
 }
 
+/* For a wait that runs before the task loop does: the boot-time radio start
+ * in main.c's InitialiseBt(), whose set-up steps would otherwise sit queued
+ * until boot gave up on the radio. Runs a queued TASK_BT_CMD_STEP now. No new
+ * step can be queued between the check and the clear, because only the reply
+ * to the step about to run can queue one. */
+void BT_runQueuedCommandStep(void)
+{
+  if (ShimTask_getList() & TASK_BT_CMD_STEP)
+  {
+    ShimTask_clear(TASK_BT_CMD_STEP);
+    BT_runCommandStep();
+  }
+}
+
 uint8_t areBtSetupCommandsRunning(void)
 {
   return (bt_setcommands_start || bt_runmastercommands_start);
