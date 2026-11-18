@@ -360,34 +360,9 @@ void bt_module_test(void)
  * in. */
 static void print_eeprom_test_result(uint8_t eeprom_result)
 {
-  const char *reason;
-  uint8_t notRestored = (eeprom_result == EEPROM_TEST_FAIL_RESTORING_BACKUP)
-      || (eeprom_result & EEPROM_TEST_FAIL_NOT_RESTORED);
+  const char *reason = CAT24C16_testFailReason(eeprom_result);
 
-  switch (eeprom_result & (uint8_t) ~EEPROM_TEST_FAIL_NOT_RESTORED)
-  {
-    case EEPROM_TEST_PASS:
-    case EEPROM_TEST_FAIL_RESTORING_BACKUP:
-      reason = SELF_TEST_STR_EMPTY;
-      break;
-    case EEPROM_TEST_FAIL_INITIAL_BACKUP:
-      reason = " - Read failed";
-      break;
-    case EEPROM_TEST_FAIL_WRITING_BUF:
-      reason = " - Write failed";
-      break;
-    case EEPROM_TEST_FAIL_READING_BUF:
-      reason = " - Read-back failed";
-      break;
-    case EEPROM_TEST_FAIL_BUF_COMPARISON:
-      reason = " - Read-back mismatch";
-      break;
-    default:
-      reason = SELF_TEST_STR_UNKNOWN;
-      break;
-  }
-
-  if (notRestored)
+  if (CAT24C16_testLeftTestData(eeprom_result))
   {
     sprintf(buffer, " - FAIL: CAT24C16%s - bytes %u-%u not restored\r\n",
         reason, (unsigned) CAT24C16_TEST_OFFSET,
@@ -407,7 +382,7 @@ void I2C_test(void)
 
   I2C_start(1);
 
-  print_eeprom_test_result(CAT24C16_test());
+  print_eeprom_test_result(eepromTest());
 
   i2cSlaveDiscover();
 
