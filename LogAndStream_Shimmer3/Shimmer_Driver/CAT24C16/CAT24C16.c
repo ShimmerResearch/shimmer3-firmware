@@ -13,7 +13,12 @@
 #include "msp430.h"
 #include "string.h"
 
-#define min(a, b) ((a < b) ? a : b)
+#define min(a, b)                   ((a < b) ? a : b)
+
+//Write cycle time, tWR: 5ms max (CAT24C16 datasheet, A.C. Characteristics).
+//The device does not acknowledge its address until a write cycle has ended.
+//120000 cycles of the 24MHz MCLK is 5ms.
+#define CAT24C16_WAIT_WRITE_CYCLE() __delay_cycles(120000)
 
 extern void I2C_start(uint8_t controlExpBrd);
 extern void I2C_stop(uint8_t controlExpBrd);
@@ -92,7 +97,9 @@ int32_t CAT24C16_write(uint16_t address, uint16_t length, uint8_t *data)
       I2C_Set_Slave_Address(++final_addr);
     }
 
-    __delay_cycles(120000); //5ms
+    //The previous write cycle, this call's or an earlier one's, must have
+    //ended before the device acknowledges this page
+    CAT24C16_WAIT_WRITE_CYCLE();
     //bounds check
     margin = CAT24C16_PAGE_SIZE - (mem_ptr % CAT24C16_PAGE_SIZE);
     this_write = min(margin, address + length - mem_ptr);
@@ -120,22 +127,51 @@ int32_t CAT24C16_write(uint16_t address, uint16_t length, uint8_t *data)
   return result;
 }
 
-//returns 0 if successful, 1 if failure
+//Write the backed-up bytes back over the test region and read them back.
+//Returns 0 once the region holds the backup again, 1 if every try failed.
+static uint8_t CAT24C16_restoreTestRegion(uint8_t *backup, uint8_t *readBack)
+{
+  uint8_t tries;
+
+  for (tries = 0; tries < CAT24C16_TEST_RESTORE_TRIES; tries++)
+  {
+    //A write cycle may still be running here: from a test write that failed
+    //after its data landed, or from the previous try. The device does not
+    //acknowledge its address until that cycle ends, so the restore's first
+    //page would be refused. CAT24C16_write() waits before each page it writes,
+    //which covers that.
+    if (CAT24C16_write(CAT24C16_TEST_OFFSET, CAT24C16_TEST_SIZE, backup))
+    {
+      continue;
+    }
+
+    //It does not wait after the last page, so the read-back does
+    CAT24C16_WAIT_WRITE_CYCLE();
+    if (CAT24C16_read(CAT24C16_TEST_OFFSET, CAT24C16_TEST_SIZE, readBack) == 0
+        && memcmp(backup, readBack, CAT24C16_TEST_SIZE) == 0)
+    {
+      return 0;
+    }
+  }
+
+  return 1;
+}
+
 uint8_t CAT24C16_test(void)
 {
-  int32_t result = 0;
+  uint8_t testResult = EEPROM_TEST_PASS;
   uint16_t i, j = 0;
   uint8_t test_eeprom_backup[CAT24C16_TEST_SIZE];
   uint8_t test_eeprom_wr[CAT24C16_TEST_SIZE];
   uint8_t test_eeprom_rd[CAT24C16_TEST_SIZE];
 
-  result = CAT24C16_read(CAT24C16_TEST_OFFSET, CAT24C16_TEST_SIZE, test_eeprom_backup);
-  if (result)
+  if (CAT24C16_read(CAT24C16_TEST_OFFSET, CAT24C16_TEST_SIZE, test_eeprom_backup))
   {
+    //Nothing has been written yet, so there is nothing to put back
     return EEPROM_TEST_FAIL_INITIAL_BACKUP;
   }
 
-  while (j++ < 3)
+  while (testResult == EEPROM_TEST_PASS && j++ < 3)
   {
     //SRAND/RAND not working on MSP430 for some reason
     //srand((unsigned) RTC_get32());
@@ -144,38 +180,42 @@ uint8_t CAT24C16_test(void)
     //    test_eeprom_wr[i] = rand();
     //}
 
-    //Increment value in
+    //Increment value in. Each pass's pattern differs from the last, so a pass
+    //whose write never happened cannot read back correctly.
     for (i = 0; i < CAT24C16_TEST_SIZE; i++)
     {
-      test_eeprom_wr[i] = j + i;
+      test_eeprom_wr[i] = (uint8_t) (j + i);
     }
 
     memset(test_eeprom_rd, 0, CAT24C16_TEST_SIZE);
-    result = CAT24C16_write(CAT24C16_TEST_OFFSET, CAT24C16_TEST_SIZE, test_eeprom_wr);
-    __delay_cycles(120000); //5ms
-    if (result)
+    if (CAT24C16_write(CAT24C16_TEST_OFFSET, CAT24C16_TEST_SIZE, test_eeprom_wr))
     {
-      return EEPROM_TEST_FAIL_WRITING_BUF;
+      testResult = EEPROM_TEST_FAIL_WRITING_BUF;
     }
-    result = CAT24C16_read(CAT24C16_TEST_OFFSET, CAT24C16_TEST_SIZE, test_eeprom_rd);
-    if (result)
+    else
     {
-      return EEPROM_TEST_FAIL_READING_BUF;
-    }
-
-    if (memcmp(test_eeprom_wr, test_eeprom_rd, CAT24C16_TEST_SIZE))
-    {
-      return EEPROM_TEST_FAIL_BUF_COMPARISON;
+      //The last page's write cycle must end before the read is acknowledged
+      CAT24C16_WAIT_WRITE_CYCLE();
+      if (CAT24C16_read(CAT24C16_TEST_OFFSET, CAT24C16_TEST_SIZE, test_eeprom_rd))
+      {
+        testResult = EEPROM_TEST_FAIL_READING_BUF;
+      }
+      else if (memcmp(test_eeprom_wr, test_eeprom_rd, CAT24C16_TEST_SIZE))
+      {
+        testResult = EEPROM_TEST_FAIL_BUF_COMPARISON;
+      }
     }
   }
 
-  result = CAT24C16_write(CAT24C16_TEST_OFFSET, CAT24C16_TEST_SIZE, test_eeprom_backup);
-  __delay_cycles(120000); //5ms
-
-  if (result)
+  //From the first write on, the test region may hold test data whatever
+  //happened after it, so every outcome puts the backup back (DEV-1495). Those
+  //bytes are host offsets 0-127 of the daughter-card memory.
+  if (CAT24C16_restoreTestRegion(test_eeprom_backup, test_eeprom_rd))
   {
-    return EEPROM_TEST_FAIL_RESTORING_BACKUP;
+    testResult = (testResult == EEPROM_TEST_PASS) ?
+        EEPROM_TEST_FAIL_RESTORING_BACKUP :
+        (uint8_t) (testResult | EEPROM_TEST_FAIL_NOT_RESTORED);
   }
 
-  return EEPROM_TEST_PASS;
+  return testResult;
 }
