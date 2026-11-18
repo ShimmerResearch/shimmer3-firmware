@@ -1498,17 +1498,58 @@ void BT_resetBaudRate(void)
   ShimBt_setBtBaudRateToUse(BAUD_115200);
 }
 
+/* Called from DMA_ISR (ShimBt_dmaConversionDone()) when the module's reply
+ * matches. The next step is queued, not run here: a step formats and queues a
+ * command (most use sprintf), and run in this interrupt it held the sample
+ * timer back by several ticks (DEV-1486). The interrupt leaves the receive
+ * DMA off, with CTS holding the module, until the step arms it. */
 void BT_setGoodCommand(void)
 {
   command_received = 1;
   clearExpectedResponseBuf();
-  if (bt_setcommands_start)
+  if (bt_setcommands_start || bt_runmastercommands_start)
   {
-    runSetCommands();
+    ShimTask_set(TASK_BT_CMD_STEP);
   }
-  if (bt_runmastercommands_start)
+}
+
+/* TASK_BT_CMD_STEP. The first step of each sequence still starts from an
+ * interrupt (runSetCommands() from the millisecond clock at the end of
+ * btInit(), runMasterCommands() from SD sync's tick through BT_connect() or
+ * BT_disconnect()); only the steps a reply completes run here. A sequence that
+ * BT_rst_MessageProgress() has ended since the step was queued (a connection
+ * seen on the pin) is not resumed. Each step arms the receive DMA for its reply,
+ * so in that case the arm the interrupt skipped for the step is made here. */
+void BT_runCommandStep(void)
+{
+  if (bt_setcommands_start || bt_runmastercommands_start)
   {
-    runMasterCommands();
+    if (bt_setcommands_start)
+    {
+      runSetCommands();
+    }
+    if (bt_runmastercommands_start)
+    {
+      runMasterCommands();
+    }
+  }
+  else if (!(DMA2CTL & DMAEN))
+  {
+    setDmaWaitingForResponseIfStatusStrEnabled();
+  }
+}
+
+/* For a wait that runs before the task loop does: the boot-time radio start
+ * in main.c's InitialiseBt(), whose set-up steps would otherwise sit queued
+ * until boot gave up on the radio. Runs a queued TASK_BT_CMD_STEP now. No new
+ * step can be queued between the check and the clear, because only the reply
+ * to the step about to run can queue one. */
+void BT_runQueuedCommandStep(void)
+{
+  if (ShimTask_getList() & TASK_BT_CMD_STEP)
+  {
+    ShimTask_clear(TASK_BT_CMD_STEP);
+    BT_runCommandStep();
   }
 }
 

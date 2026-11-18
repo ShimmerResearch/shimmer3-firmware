@@ -303,6 +303,7 @@ void InitialiseBt(void)
   uint8_t failCount = 0U;
   uint8_t baudIndex = 0;
   uint8_t baudsTried[BAUD_1000000 + 1U] = { 0 };
+  uint8_t ms;
 
   /* Try the inital baud rate first */
   baudsTried[initialBaudRate] = 1U;
@@ -314,7 +315,14 @@ void InitialiseBt(void)
    * 115200, 1000000 or 460800 and then all other bauds. If they all fail, soft-reset */
   while (!shimmerStatus.btIsInitialised)
   {
-    _delay_cycles(2400000); //100ms
+    /* 100 ms, in 1 ms steps. Each module reply queues the next set-up step
+     * as TASK_BT_CMD_STEP (DEV-1486), and the task loop does not run until
+     * boot has finished, so the steps are run here. */
+    for (ms = 0U; ms < 100U; ms++)
+    {
+      BT_runQueuedCommandStep();
+      __delay_cycles(MSP430_MCU_CYCLES_PER_MS);
+    }
 
     if (!(reset_cnt--))
     {
