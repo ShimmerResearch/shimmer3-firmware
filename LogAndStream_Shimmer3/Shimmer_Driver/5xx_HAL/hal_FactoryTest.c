@@ -354,15 +354,35 @@ void bt_module_test(void)
   ShimFactoryTest_sendReport(buffer);
 }
 
+/* The CAT24C16 line, with why it failed and, when the test could not put the
+ * bytes it overwrote back, which ones now hold test data. Those are host
+ * offsets 0-127 of the daughter-card memory, which a host may have stored data
+ * in. */
+static void print_eeprom_test_result(uint8_t eeprom_result)
+{
+  const char *reason = CAT24C16_testFailReason(eeprom_result);
+
+  if (CAT24C16_testLeftTestData(eeprom_result))
+  {
+    sprintf(buffer, " - FAIL: CAT24C16%s - bytes %u-%u not restored\r\n",
+        reason, (unsigned) CAT24C16_TEST_OFFSET,
+        (unsigned) (CAT24C16_TEST_OFFSET + CAT24C16_TEST_SIZE - 1));
+  }
+  else
+  {
+    sprintf(buffer, " - %s: CAT24C16%s\r\n",
+        eeprom_result ? SELF_TEST_STR_FAIL : SELF_TEST_STR_PASS, reason);
+  }
+  ShimFactoryTest_sendReport(buffer);
+}
+
 void I2C_test(void)
 {
   ShimFactoryTest_sendReport("I2C:\r\n");
 
   I2C_start(1);
 
-  uint8_t eeprom_result = CAT24C16_test();
-  sprintf(buffer, " - %s: CAT24C16\r\n", eeprom_result ? "FAIL" : "PASS");
-  ShimFactoryTest_sendReport(buffer);
+  print_eeprom_test_result(eepromTest());
 
   i2cSlaveDiscover();
 

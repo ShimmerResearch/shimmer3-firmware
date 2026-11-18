@@ -16,6 +16,8 @@ enum EEPROM_RW
   EEPROM_WRITE = 1,
 };
 
+//The factory self-test, CAT24C16_test(). Expects the I2C bus already up.
+uint8_t eepromTest(void);
 void eepromRead(uint16_t dataAddr, uint16_t dataSize, uint8_t *dataBuf);
 void eepromWrite(uint16_t dataAddr, uint16_t dataSize, uint8_t *dataBuf);
 void eepromReadWrite(uint16_t dataAddr, uint16_t dataSize, uint8_t *dataBuf, enum EEPROM_RW eepromRW);
