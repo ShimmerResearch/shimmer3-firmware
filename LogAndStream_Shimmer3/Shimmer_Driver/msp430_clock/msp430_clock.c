@@ -23,7 +23,6 @@
 #include "msp430.h"
 #include "stdio.h"
 #include "string.h"
-#include <math.h>
 
 #define MAX_CB 15
 
@@ -51,7 +50,11 @@ __interrupt void TIMER1_A0_ISR(void)
 
   this_ts = (uint32_t) GetTA1();
   TA1CCR0 = this_ts + clock.ticks_per_interrupt;
-  td_in_ms = fmod(65536 + this_ts - last_ts, 65536) / clock.ticks_per_interrupt;
+  /* Ticks since the last interrupt, modulo the 16-bit timer, in whole
+   * interrupt periods. Integer arithmetic on purpose: the double-precision
+   * fmod() this replaced ran in software every millisecond and held the
+   * sample timer's interrupt off by up to 2 ticks (DEV-1482). */
+  td_in_ms = (uint16_t) ((uint16_t) (this_ts - last_ts) / clock.ticks_per_interrupt);
   last_ts = this_ts;
   clock.timestamp += td_in_ms;
 
