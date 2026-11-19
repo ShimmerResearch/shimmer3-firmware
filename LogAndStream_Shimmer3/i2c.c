@@ -82,6 +82,14 @@ void I2C_startSensing(void)
   uint8_t ICMsampleRateDiv = 0;
   gConfigBytes *storedConfigPtr = ShimConfig_getStoredConfig();
 
+  /* The pre-sample flags are set below only for a sensor this session uses,
+   * so clear what the last session left. SampleTimerStart() reads them: a flag
+   * left set by a session with pressure (or the MPU9x50 mag) on armed a timer
+   * channel that queued a start of that sensor every sample period, though
+   * nothing read it - an I2C write in the main loop each period, until a
+   * reset (DEV-1503). */
+  I2C_varsInit();
+
   if (sensing.nbrI2cChans)
   {
     I2C_start(0);
