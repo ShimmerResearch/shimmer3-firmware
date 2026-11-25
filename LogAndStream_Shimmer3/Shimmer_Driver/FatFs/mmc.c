@@ -16,6 +16,7 @@
 #include "diskio.h"             /* Common include file for FatFs and disk I/O layer */
 #include "mmc.h"
 #include "../5xx_HAL/hal_SDCard.h"         /* MSP-EXP430F5529 specific SD Card driver */
+#include "TaskList/shimmer_taskList.h"     /* Shimmer: ShimTask_serviceSamplingWhileSdBusy() */
 
 /*-------------------------------------------------------------------------*/
 /* Platform dependent macros and functions needed to be modified           */
@@ -137,7 +138,14 @@ int wait_ready (void)    /* 1:OK, 0:Timeout */
     for (tmr = 5000; tmr; tmr--) {    /* Wait for ready in timeout of 500ms */
         rcvr_mmc(&d, 1);
         if (d == 0xFF) return 1;
-        DLY_US(100);
+        /* Shimmer: while a log's write waits here, keep sampling. The sensor
+         * reads that complete each sample run in the main loop, which this
+         * loop holds, so every sample due during a busy card was lost. The
+         * card is on UCB1 and the sensors on UCB0 and UCA0, so their reads
+         * don't disturb it. A pass that did that work has taken longer than
+         * the delay already, so it skips it and the timeout stays about
+         * 500 ms (longer at high rates, where the reads fill most of a pass). */
+        if (!ShimTask_serviceSamplingWhileSdBusy()) DLY_US(100);
     }
 
     return 0;
