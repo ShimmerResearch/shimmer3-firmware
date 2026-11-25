@@ -202,7 +202,11 @@ int rcvr_datablock (    /* 1:OK, 0:Failed */
     for (tmr = 1000; tmr; tmr--) {    /* Wait for data packet in timeout of 100ms */
         rcvr_mmc(d, 1);
         if (d[0] != 0xFF) break;
-        DLY_US(100);
+        /* Shimmer: as in wait_ready(). A log's write also reads the card (FAT
+         * and directory sectors, when it takes a new cluster and when it syncs
+         * the file), and samples due while it waits here for the data were
+         * lost the same way. The timeout stays about 100 ms. */
+        if (!ShimTask_serviceSamplingWhileSdBusy()) DLY_US(100);
     }
     if (d[0] != 0xFE) return 0;        /* If not valid data token, retutn with error */
 
