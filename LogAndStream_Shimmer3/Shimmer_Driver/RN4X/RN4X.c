@@ -1771,10 +1771,16 @@ uint8_t BT_write_rn4678_ble(uint8_t *buf, uint8_t len, btResponseType responseTy
 
 uint8_t BT_write_rn4678_with_buf(uint8_t *buf, uint8_t len, btResponseType responseType, uint8_t sampleSetBufferSize)
 {
-  /* Buffer before sending to the BT module */
+  /* Buffer before sending to the BT module. A data packet is refused while a
+   * reply is held, while a full group is already waiting or while the module
+   * holds RTS. A transfer in progress is not a reason on its own: the TX chain
+   * runs until the ring is empty, so a packet added now goes out with it, and
+   * one added just after the chain ends is grouped as usual below. Refusing it
+   * dropped a sample after command replies, because a reply starts a transfer
+   * at once and the next sample was often drained while it was going out. */
   if (responseType == SENSOR_DATA
       && (gBtReplyPendingLen != 0U || ShimBt_getUsedSpaceInBtTxBuf() >= sampleSetBufferSize
-          || ShimBt_btTxInProgressGet() || isBtModuleOverflowPinHigh()))
+          || isBtModuleOverflowPinHigh()))
   {
     return 1; //fail
   }
