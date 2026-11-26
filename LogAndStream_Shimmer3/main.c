@@ -789,8 +789,12 @@ __interrupt void TIMER0_B1_ISR(void)
       }
 
       break;
-    case 8:
-      break; //TB0CCR4
+    case 8: //TB0CCR4
+      //I2C transfer timeout, a one-shot armed by hal_I2C.c: wake its wait
+      //so it can abandon the transfer
+      TB0CCTL4 &= ~CCIE;
+      __bic_SR_register_on_exit(LPM3_bits);
+      break;
     case 10:
       break; //reserved
     case 12:

@@ -408,7 +408,10 @@ void I2C_configureChannels(void)
   {
     isIcm20948GyroEn = true;
   }
-  if (storedConfigPtr->chEnAltAccel
+  //Alt accel comes from the ICM-20948 only on boards that carry one. On an
+  //MPU-9x50 board I2C_pollSensors reads it from the MPU, and there is no
+  //ICM-20948 to read
+  if ((ShimBrd_isGyroInUseIcm20948() && storedConfigPtr->chEnAltAccel)
       || (ShimBrd_isWrAccelInUseIcm20948() && storedConfigPtr->chEnWrAccel))
   {
     isIcm20948AccelEn = true;
