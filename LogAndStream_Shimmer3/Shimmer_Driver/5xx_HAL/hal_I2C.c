@@ -63,11 +63,9 @@
 //A slave stops mid-byte with at most 8 data bits and an ACK left to clock
 #define I2C_BUS_CLEAR_MAX_CLOCKS      9
 
-//Bound on the polls of a START or STOP the USCI is sending. Each one takes
-//tens of microseconds at 400kHz; these bounds are a few milliseconds.
-#define I2C_STT_STP_SPIN_LIMIT        3000U //tight polls, in the ISR
-#define I2C_PROBE_POLL_LIMIT          2000U //polls 1us apart, in the address scan
-#define I2C_PROBE_POLL_CYCLES         24    //1us of the 24MHz MCLK
+//Bound on the address scan's wait for its STOP, in polls 1us apart
+#define I2C_PROBE_POLL_LIMIT          2000U
+#define I2C_PROBE_POLL_CYCLES         24 //1us of the 24MHz MCLK
 
 //Local Variables
 //@brief tx_packet_length is how many bytes of data will be written
@@ -85,8 +83,6 @@ uint8_t *rx_packet_data;
 volatile uint8_t receive_flag;
 //@brief transmit flag is used for the ISR to know the MSP430 will be writing to the CP
 volatile uint8_t transmit_flag;
-//@brief set by the ISR when the slave didn't acknowledge, which ends the transfer
-volatile uint8_t nack_flag;
 
 //@brief Used to keep track how many bytes have been received
 volatile uint16_t rx_byte_ctr;
@@ -186,26 +182,6 @@ static void I2C_abortTransfer(void)
   transmit_flag = 0;
   receive_flag = 0;
   I2C_busClear();
-}
-
-/**
- * @brief Arms the transfer timeout: TB0CCR4 as a one-shot compare, whose
- * interrupt (TIMER0_B1_ISR, main.c) wakes the LPM0 wait below.
- *
- * The wait tests its timeout only when something wakes it. The USCI interrupt
- * does while the transfer runs; once the bus stalls, nothing else may, because
- * the wait runs inside a task, and while a task is executing ShimTask_set()
- * doesn't wake the CPU for a newly queued one.
- */
-static void I2C_timeoutArm(uint16_t start)
-{
-  TB0CCR4 = start + i2c_timeout;
-  TB0CCTL4 = CCIE; //Compare mode, flag cleared
-}
-
-static void I2C_timeoutDisarm(void)
-{
-  TB0CCTL4 = 0;
 }
 
 /**
@@ -526,7 +502,6 @@ uint8_t I2C_Write_Packet_To_Sensor(uint8_t *writeData, uint8_t dataLength)
   //Reset variables for transmission
   transmit_flag = 1;
   receive_flag = 0;
-  nack_flag = 0;
   tx_byte_ctr = 0;
   rx_byte_ctr = 0;
 
@@ -537,7 +512,6 @@ uint8_t I2C_Write_Packet_To_Sensor(uint8_t *writeData, uint8_t dataLength)
   UCB0IFG |= UCB0TXIFG;
 
   start = GetTB0();
-  I2C_timeoutArm(start);
   //Enter Low Power Mode 0. The flag is only tested with interrupts disabled,
   //so the ISR can't clear it between the test and entering LPM0, which
   //re-enables them in the same instruction.
@@ -547,15 +521,15 @@ uint8_t I2C_Write_Packet_To_Sensor(uint8_t *writeData, uint8_t dataLength)
     __disable_interrupt();
     if (transmit_flag)
     {
-      //only check for timeout if still waiting to transmit. Elapsed ticks,
-      //so a wrap of TB0 between start and now doesn't matter
+      //only check for timeout if still waiting to transmit
       now = GetTB0();
-      if ((uint16_t) (now - start) >= i2c_timeout)
-      {
+      if (((!((start + i2c_timeout) < start)) && (now >= (start + i2c_timeout)))
+          || (((start + i2c_timeout) < start) && (now < start)
+              && (now >= (start + i2c_timeout))))
+      { //needed to handle timer overflow
         //timeout. Reset the USCI before restoring GIE: in I2C mode UCSWRST
         //also clears UCB0IE and UCB0IFG, so no USCI_I2C_ISR can run against
         //the abandoned transfer once interrupts are back on.
-        I2C_timeoutDisarm();
         I2C_abortTransfer();
         __bis_SR_register(gie); //Restore original GIE state
         __delay_cycles(240000); //10ms (assuming 24MHz clock)
@@ -564,9 +538,8 @@ uint8_t I2C_Write_Packet_To_Sensor(uint8_t *writeData, uint8_t dataLength)
       }
     }
   }
-  I2C_timeoutDisarm();
   __bis_SR_register(gie); //Restore original GIE state
-  return nack_flag ? 0 : 1;
+  return 1;
 }
 
 /**
@@ -593,7 +566,6 @@ uint8_t I2C_Read_Packet_From_Sensor(uint8_t *readData, uint16_t dataLength)
   //Reset variables for transmission
   transmit_flag = 0;
   receive_flag = 1;
-  nack_flag = 0;
   tx_byte_ctr = 0;
   rx_byte_ctr = 0;
 
@@ -605,7 +577,6 @@ uint8_t I2C_Read_Packet_From_Sensor(uint8_t *readData, uint16_t dataLength)
   UCB0IFG |= UCB0TXIFG;
 
   start = GetTB0();
-  I2C_timeoutArm(start);
   //Enter Low Power Mode 0. The flag is only tested with interrupts disabled,
   //so the ISR can't clear it between the test and entering LPM0, which
   //re-enables them in the same instruction.
@@ -615,15 +586,15 @@ uint8_t I2C_Read_Packet_From_Sensor(uint8_t *readData, uint16_t dataLength)
     __disable_interrupt();
     if (receive_flag)
     {
-      //only check for timeout if still waiting to transmit. Elapsed ticks,
-      //so a wrap of TB0 between start and now doesn't matter
+      //only check for timeout if still waiting to transmit
       now = GetTB0();
-      if ((uint16_t) (now - start) >= i2c_timeout)
-      {
+      if (((!((start + i2c_timeout) < start)) && (now >= (start + i2c_timeout)))
+          || (((start + i2c_timeout) < start) && (now < start)
+              && (now >= (start + i2c_timeout))))
+      { //needed to handle timer overflow
         //timeout. Reset the USCI before restoring GIE: in I2C mode UCSWRST
         //also clears UCB0IE and UCB0IFG, so no USCI_I2C_ISR can run against
         //the abandoned transfer once interrupts are back on.
-        I2C_timeoutDisarm();
         I2C_abortTransfer();
         __bis_SR_register(gie); //Restore original GIE state
         __delay_cycles(240000); //10ms (assuming 24MHz clock)
@@ -632,9 +603,8 @@ uint8_t I2C_Read_Packet_From_Sensor(uint8_t *readData, uint16_t dataLength)
       }
     }
   }
-  I2C_timeoutDisarm();
   __bis_SR_register(gie); //Restore original GIE state
-  return nack_flag ? 0 : 1;
+  return 1;
 }
 
 char i2cSlavePresent(char address)
@@ -678,25 +648,15 @@ void i2cSlaveDiscover(void)
 
 __interrupt void USCI_I2C_ISR(void)
 {
-  uint16_t spins;
-
   switch (__even_in_range(UCB0IV, 12))
   {
     case 0:
       break; //Vector  0: No interrupts
     case 2:
-      break; //Vector  2: ALIFG
-    case 4:  //Vector  4: NACKIFG
-      //Nothing acknowledged the address or a byte. End the transfer with a
-      //STOP and report it failed. Re-STARTing instead repeats the same NACK
-      //until the caller's timeout resets the USCI mid-transfer, and that can
-      //leave a slave holding SDA low.
-      UCB0CTL1 |= UCTXSTP;
-      UCB0IE &= ~(UCB0TXIE + UCB0RXIE + UCNACKIE);
-      UCB0IFG &= ~UCB0TXIFG;
-      nack_flag = 1;
-      transmit_flag = 0;
-      receive_flag = 0;
+      break;               //Vector  2: ALIFG
+    case 4:                //Vector  4: NACKIFG
+      UCB0CTL1 |= UCTXSTT; //Re-start condition
+      tx_byte_ctr = 0;
       break;
     case 6:
       break; //Vector  6: STTIFG
@@ -727,11 +687,8 @@ __interrupt void USCI_I2C_ISR(void)
       {
         if (tx_byte_ctr == 0)
         {
-          //Ensure stop condition got sent. Bounded: if the bus is held it
-          //never goes, and the caller's timeout recovers the bus
-          spins = I2C_STT_STP_SPIN_LIMIT;
-          while ((UCB0CTL1 & UCTXSTP) && --spins)
-            ;
+          while (UCB0CTL1 & UCTXSTP)
+            ;                         //Ensure stop condition got sent
           UCB0CTL1 |= UCTR + UCTXSTT; //Send I2C start condition
           tx_byte_ctr++;
         }
@@ -753,10 +710,8 @@ __interrupt void USCI_I2C_ISR(void)
       {
         if (tx_byte_ctr == 0)
         {
-          //Ensure stop condition got sent, bounded as above
-          spins = I2C_STT_STP_SPIN_LIMIT;
-          while ((UCB0CTL1 & UCTXSTP) && --spins)
-            ;
+          while (UCB0CTL1 & UCTXSTP)
+            ;                         //Ensure stop condition got sent
           UCB0CTL1 |= UCTR + UCTXSTT; //I2C start condition
           tx_byte_ctr++;
         }
@@ -772,9 +727,8 @@ __interrupt void USCI_I2C_ISR(void)
           //In the case of reading one byte, poll on start condition bit
           if (rx_packet_length == 1)
           {
-            //Wait for start condition to be transmitted, bounded as above
-            spins = I2C_STT_STP_SPIN_LIMIT;
-            while ((UCB0CTL1 & UCTXSTT) && --spins)
+            //Wait for start condition to be transmitted
+            while (UCB0CTL1 & UCTXSTT)
               ;
             UCB0CTL1 |= UCTXSTP; //Send I2C stop condition
           }
