@@ -66,6 +66,7 @@
 
 #include "log_and_stream_externs.h"
 #include "log_and_stream_includes.h"
+#include "shimmer_definitions.h"
 #include "version.h"
 
 uint8_t starting;
@@ -1485,6 +1486,52 @@ void btCmdModeStart(void)
   BT_setWaitForStartCmd(1U);
   setDmaWaitingForResponse(RN4X_CMD_LEN);
   writeCommandNoRsp("$$$");
+}
+
+/* DEV-1560. An RN42 with deep sleep enabled (SW with bit 15 set) is woken by
+ * a byte at its UART but loses that byte, so the first '$' is dropped and
+ * "$$$" never enters command mode. Raising CTS from low to high and waiting
+ * 5 ms wakes it without losing data (Roving Networks RN-BT-DATA-UG v1.0r,
+ * section 3.1.3). The firmware did this before every "$$$" until October 2022,
+ * when it was dropped (SHIM3-264): CTS held high at that point let the
+ * RN4678's "%REBOOT%" status string arrive where "CMD" was expected. So it is
+ * done only here, for a "$$$" that has had no reply, and the receive is
+ * restarted from an empty buffer before "$$$" is sent again.
+ *
+ * Call it at least 1 s after the unanswered "$$$": the RN42 does not enter
+ * command mode if other bytes arrive within 1 s of "$$$". Returns 1 if "$$$"
+ * was sent again. Returns 0 if no "$$$" is waiting for its reply, or if a
+ * reply has just completed and its interrupt has yet to run: the caller can
+ * try again once it has. */
+uint8_t BT_retryCmdModeStartWithCtsWake(void)
+{
+  uint16_t interruptState = __get_interrupt_state();
+
+  /* The reply can complete in the DMA interrupt up to the point the receive
+   * is stopped, so check and stop together. */
+  __disable_interrupt();
+  if (!waitForStartCmd || isRnCommandModeActive() || (DMA2CTL & DMAIFG))
+  {
+    __set_interrupt_state(interruptState);
+    return 0;
+  }
+  DMA2_disable();
+  __set_interrupt_state(interruptState);
+
+  /* Low first, so there is a rising edge even if the receive left CTS high */
+  setIsBtClearToSend(1);
+  __delay_cycles(MSP430_MCU_CYCLES_PER_MS);
+  setIsBtClearToSend(0);
+  __delay_cycles(5U * MSP430_MCU_CYCLES_PER_MS);
+
+  /* Drop whatever arrived in place of "CMD", including a byte still waiting
+   * in the UART, so it cannot become the first byte of the reply. */
+  ShimBt_resetBtRxBuffs();
+  (void) UCA1RXBUF;
+
+  /* Arms the receive for "CMD", which lowers CTS again, then sends "$$$" */
+  btCmdModeStart();
+  return 1;
 }
 
 void btCmdModeStop(void)

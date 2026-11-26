@@ -265,6 +265,12 @@ void platform_sleepWhenNoTask(void)
   __bis_SR_register(LPM3_bits + GIE); /* ACLK remains active */
 }
 
+/* 100 ms ticks without a reply to "$$$" before InitialiseBt() wakes the
+ * module through CTS and sends it again (DEV-1560). At least 10, because the
+ * RN42 ignores "$$$" if other bytes arrive within 1 s of it. A healthy module
+ * replies within milliseconds. */
+#define BT_CMD_WAKE_RETRY_TICKS 15U
+
 void InitialiseBt(void)
 {
   //This is the start of all BT initialisation
@@ -304,6 +310,10 @@ void InitialiseBt(void)
   uint8_t baudIndex = 0;
   uint8_t baudsTried[BAUD_1000000 + 1U] = { 0 };
   uint8_t ms;
+  /* 100 ms ticks this attempt has spent waiting for the reply to "$$$", and
+   * whether the CTS wake retry has been made in this attempt (DEV-1560) */
+  uint8_t cmdWaitTicks = 0U;
+  uint8_t cmdWakeRetried = 0U;
 
   /* Try the inital baud rate first */
   baudsTried[initialBaudRate] = 1U;
@@ -322,6 +332,17 @@ void InitialiseBt(void)
     {
       BT_runQueuedCommandStep();
       __delay_cycles(MSP430_MCU_CYCLES_PER_MS);
+    }
+
+    /* If "$$$" has had no reply, wake the module through CTS and send it
+     * again, once per attempt (DEV-1560). The wait is given back to the
+     * attempt, so the second "$$$" has as long to finish set-up as the
+     * first had. */
+    if (!cmdWakeRetried && BT_getWaitForStartCmd() && (++cmdWaitTicks >= BT_CMD_WAKE_RETRY_TICKS)
+        && BT_retryCmdModeStartWithCtsWake())
+    {
+      cmdWakeRetried = 1U;
+      reset_cnt += BT_CMD_WAKE_RETRY_TICKS;
     }
 
     if (!(reset_cnt--))
@@ -370,9 +391,14 @@ void InitialiseBt(void)
 
       baudsTried[initialBaudRate] = 1U;
       ShimBt_setBtBaudRateToUse(initialBaudRate);
+      /* The module has been restarted, so the last attempt's "$$$" is no
+       * longer waiting for a reply */
+      BT_setWaitForStartCmd(0U);
       BtStart();
 
       reset_cnt = 50U;
+      cmdWaitTicks = 0U;
+      cmdWakeRetried = 0U;
     }
   }
 

@@ -389,6 +389,7 @@ uint8_t *BT_getExpResp(void);
 uint8_t BT_getWaitForInitialBoot(void);
 void BT_setWaitForStartCmd(uint8_t val);
 uint8_t BT_getWaitForStartCmd(void);
+uint8_t BT_retryCmdModeStartWithCtsWake(void);
 void BT_setWaitForMacAddress(uint8_t val);
 uint8_t BT_getWaitForMacAddress(void);
 void BT_setWaitForVersion(uint8_t val);
