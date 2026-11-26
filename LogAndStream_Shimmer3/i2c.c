@@ -35,6 +35,9 @@ extern uint16_t clk_30, clk_45, clk_55, clk_64, clk_75, clk_133, clk_90, clk_120
     clk_135, clk_225, clk_255, clk_432, clk_1000, clk_2500, clk_90_45, clk_90_64,
     clk_90_75, clk_133_90, clk_135_90, clk_225_90, clk_255_90, clk_432_90;
 
+extern void BlinkTimerStart(void);
+extern void BlinkTimerStop(void);
+
 void I2C_varsInit(void)
 {
   preSampleMpuMag = 0;
@@ -74,6 +77,48 @@ void I2C_stop(uint8_t controlExpBrd)
   {
     /* 5ms delay needed to ensure no writes pending but this is handled above */
     Board_setExpansionBrdPower(0);
+  }
+}
+
+/* GET_MPU9150_MAG_SENS_ADJ_VALS (log_and_stream_externs.h). While nothing is
+ * sensing the I2C chips are unpowered and the USCI is held in reset, so a
+ * transfer started then never completes and the unit stops answering. Start
+ * the bus for the read, and TB0 too if it is stopped, because the transfers
+ * time out on it; put both back as they were. eepromReadWrite() does the same. */
+void I2C_readMpu9150MagSensAdj(uint8_t *buf)
+{
+  uint8_t wasI2cRunning = shimmerStatus.pinPvI2c;
+  uint8_t timerWasStopped = 0;
+  uint8_t wasAwake;
+
+  if (TB0CTL == MC_0)
+  {
+    BlinkTimerStart();
+    timerWasStopped = 1;
+  }
+  if (!wasI2cRunning)
+  {
+    I2C_start(0);
+  }
+
+  MPU9150_init(); //pass-through on, so the compass can be reached
+  //While sensing, the gyro or alt accel may be using the MPU: leave it awake.
+  //Otherwise wake it and put it back to sleep, as this command always has.
+  wasAwake = MPU9150_isAwake();
+  MPU9150_wake(1);
+  if (!wasAwake)
+  {
+    MPU9150_wake(0);
+  }
+  MPU9150_getMagSensitivityAdj(buf);
+
+  if (!wasI2cRunning)
+  {
+    I2C_stop(0);
+  }
+  if (timerWasStopped)
+  {
+    BlinkTimerStop();
   }
 }
 
@@ -408,7 +453,10 @@ void I2C_configureChannels(void)
   {
     isIcm20948GyroEn = true;
   }
-  if (storedConfigPtr->chEnAltAccel
+  //Alt accel comes from the ICM-20948 only on boards that carry one. On an
+  //MPU-9x50 board I2C_pollSensors reads it from the MPU, and there is no
+  //ICM-20948 to read
+  if ((ShimBrd_isGyroInUseIcm20948() && storedConfigPtr->chEnAltAccel)
       || (ShimBrd_isWrAccelInUseIcm20948() && storedConfigPtr->chEnWrAccel))
   {
     isIcm20948AccelEn = true;
