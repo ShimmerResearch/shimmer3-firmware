@@ -13,6 +13,7 @@
 void I2C_varsInit(void);
 void I2C_start(uint8_t controlExpBrd);
 void I2C_stop(uint8_t controlExpBrd);
+void I2C_readMpu9150MagSensAdj(uint8_t *buf);
 void I2C_startSensing(void);
 void I2C_stopSensing(void);
 void I2C_configureChannels(void);

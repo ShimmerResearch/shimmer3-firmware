@@ -97,6 +97,9 @@ uint8_t MPU9150_getId(void);
 //else wakes it up
 void MPU9150_wake(uint8_t wakeup);
 
+//1 if the MPU9150 is awake, 0 if it is asleep (PWR_MGMT_1 SLEEP bit)
+uint8_t MPU9150_isAwake(void);
+
 //put x, y and z gyro values into buf (big endian)
 void MPU9150_getGyro(uint8_t *buf);
 
