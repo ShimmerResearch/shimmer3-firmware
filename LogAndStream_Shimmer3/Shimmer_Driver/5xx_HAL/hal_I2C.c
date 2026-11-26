@@ -63,9 +63,39 @@
 //A slave stops mid-byte with at most 8 data bits and an ACK left to clock
 #define I2C_BUS_CLEAR_MAX_CLOCKS      9
 
-//Bound on the address scan's wait for its STOP, in polls 1us apart
+//Bound on the address scan's wait for its STOP, in polls 1us apart. A failed
+//transfer waits up to the same for the STOP that ended it.
 #define I2C_PROBE_POLL_LIMIT          2000U
 #define I2C_PROBE_POLL_CYCLES         24 //1us of the 24MHz MCLK
+
+//Bound on USCI_I2C_ISR's polls of a START or STOP the USCI is sending. Each
+//poll is under 10 cycles, so this is about a millisecond; a START and address
+//take about 50us at 400kHz.
+#define I2C_STT_STP_SPIN_LIMIT        3000U
+
+/*
+ * Whether a transfer's wait has run past its timeout: now has left
+ * [start, deadline), where deadline = start + i2c_timeout and the range may
+ * wrap past 0xFFFF. That is (uint16_t) (now - start) >= i2c_timeout. The test
+ * this replaces compared absolute TB0 values, so once TB0 wrapped (every 2s at
+ * 32768Hz) a wake ended the wait only if it fell in a window whose size
+ * depended on start.
+ *
+ * It is written in parts, like the old test, because that keeps the wait's
+ * code as it was. As one subtraction and compare, or as an inline function,
+ * the compiler lays the wait out differently, and that moves the timing of
+ * every transfer by a few cycles. The RN42's throughput at 1024Hz depends on
+ * that timing, and on the sample and Bluetooth interrupts': 48 cycles more per
+ * transfer once cost 30% of the delivered samples. Written this way, a wake
+ * that doesn't end the wait runs the same 8 instructions and 13 cycles as
+ * before.
+ *
+ * i2c_timeout = 0, which USCI_I2C_ISR sets to end a transfer, empties the
+ * range, so the wait ends at its next test.
+ */
+#define I2C_TIMED_OUT(start, now, deadline)                                 \
+  (((deadline) >= (start)) ? (((now) < (start)) || ((now) >= (deadline))) : \
+                             (((now) < (start)) && ((now) >= (deadline))))
 
 //Local Variables
 //@brief tx_packet_length is how many bytes of data will be written
@@ -89,7 +119,12 @@ volatile uint16_t rx_byte_ctr;
 //@brief Used to keep track how many bytes have been transmitted
 volatile uint8_t tx_byte_ctr;
 
-uint16_t i2c_timeout;
+//@brief The ticks of TB0 a transfer's wait allows it. USCI_I2C_ISR sets this to
+//0 to end the transfer at the wait's next test (I2C_isrEndTransfer), and
+//I2C_failedTransferLeftBusFree() puts i2c_timeout_ticks back.
+volatile uint16_t i2c_timeout;
+//@brief The configured timeout, for the clock TB0 runs from
+static uint16_t i2c_timeout_ticks;
 
 extern float clockFreq;
 
@@ -185,6 +220,84 @@ static void I2C_abortTransfer(void)
 }
 
 /**
+ * @brief Ends the transfer in progress as failed, from USCI_I2C_ISR.
+ *
+ * Stops the USCI's interrupts, then zeroes i2c_timeout so the waiting
+ * function's next timeout test fails. USCI_I2C_ISR exits LPM0 as it returns,
+ * so that test comes straight away, and the wait ends the transfer.
+ *
+ * Failing a transfer this way leaves the code every transfer runs unchanged.
+ * A result flag of its own would have to be cleared and tested on every
+ * transfer, and those cycles cut the RN42's throughput (see I2C_TIMED_OUT).
+ */
+static void I2C_isrEndTransfer(void)
+{
+  UCB0IE &= ~(UCB0TXIE + UCB0RXIE + UCNACKIE);
+  UCB0IFG &= ~(UCB0TXIFG + UCB0RXIFG);
+  if (transmit_flag || receive_flag)
+  {
+    i2c_timeout = 0;
+  }
+}
+
+/**
+ * @brief Polls a START or STOP that the USCI is sending until it has gone.
+ *
+ * Bounded, because it runs in USCI_I2C_ISR with interrupts masked: with the bus
+ * held, the condition never goes out, and an unbounded poll stops the CPU for
+ * good.
+ *
+ * @param bit UCTXSTT or UCTXSTP
+ * @return 1 once the bit has cleared, 0 if it was still set at the bound
+ */
+static inline uint8_t I2C_waitSent(uint8_t bit)
+{
+  uint16_t spins = I2C_STT_STP_SPIN_LIMIT;
+
+  while (UCB0CTL1 & bit)
+  {
+    if (!--spins)
+    {
+      return 0;
+    }
+  }
+  return 1;
+}
+
+/**
+ * @brief The first step of a failed transfer: one whose wait timed out, or that
+ * USCI_I2C_ISR ended (I2C_isrEndTransfer). Called from the wait with
+ * interrupts masked.
+ *
+ * Puts i2c_timeout back and clears the transfer's flags. After a NACK the ISR
+ * has sent a STOP, and once it is out the bus is free, so the next transfer can
+ * start at once. Anything else, a stalled transfer or a START or STOP that
+ * never went out, needs the USCI reset and the bus cleared.
+ *
+ * @return 1 if the bus is free, 0 if the caller must abandon the transfer
+ */
+static uint8_t I2C_failedTransferLeftBusFree(void)
+{
+  uint8_t endedByIsr = (i2c_timeout == 0);
+  uint16_t polls = 0;
+
+  i2c_timeout = i2c_timeout_ticks;
+  transmit_flag = 0;
+  receive_flag = 0;
+
+  if (!endedByIsr)
+  {
+    return 0;
+  }
+  while ((UCB0CTL1 & UCTXSTP) && (polls < I2C_PROBE_POLL_LIMIT))
+  {
+    __delay_cycles(I2C_PROBE_POLL_CYCLES);
+    polls++;
+  }
+  return (UCB0CTL1 & (UCTXSTT + UCTXSTP)) ? 0 : 1;
+}
+
+/**
  * @brief <b>Function Name</b>:     : I2C_Master_Init
  * @brief  <b>Description</b>: Initializes the I2C Master Block. Upon successful
  * initialization of the I2C master block, this function will have set the bus
@@ -232,12 +345,13 @@ void I2C_Master_Init(uint8_t selectClockSource, uint32_t clockSourceFrequency, u
 
   if (clockFreq == (float) MSP430_CLOCK)
   {
-    i2c_timeout = I2C_TIMEOUT;
+    i2c_timeout_ticks = I2C_TIMEOUT;
   }
   else
   {
-    i2c_timeout = I2C_TIMEOUT_TCXO;
+    i2c_timeout_ticks = I2C_TIMEOUT_TCXO;
   }
+  i2c_timeout = i2c_timeout_ticks;
 
   I2C_Enable();
 }
@@ -492,7 +606,7 @@ uint8_t TI_USCI_I2C_slave_present(uint8_t slave_address)
  **/
 uint8_t I2C_Write_Packet_To_Sensor(uint8_t *writeData, uint8_t dataLength)
 {
-  uint16_t start, now;
+  uint16_t start, now, deadline;
   uint16_t gie = __get_SR_register() & GIE; //Store current GIE state
 
   //Assign values to local variables
@@ -523,17 +637,21 @@ uint8_t I2C_Write_Packet_To_Sensor(uint8_t *writeData, uint8_t dataLength)
     {
       //only check for timeout if still waiting to transmit
       now = GetTB0();
-      if (((!((start + i2c_timeout) < start)) && (now >= (start + i2c_timeout)))
-          || (((start + i2c_timeout) < start) && (now < start)
-              && (now >= (start + i2c_timeout))))
-      { //needed to handle timer overflow
-        //timeout. Reset the USCI before restoring GIE: in I2C mode UCSWRST
-        //also clears UCB0IE and UCB0IFG, so no USCI_I2C_ISR can run against
-        //the abandoned transfer once interrupts are back on.
-        I2C_abortTransfer();
+      deadline = start + i2c_timeout;
+      if (I2C_TIMED_OUT(start, now, deadline))
+      {
+        if (!I2C_failedTransferLeftBusFree())
+        {
+          //Reset the USCI before restoring GIE: in I2C mode UCSWRST also
+          //clears UCB0IE and UCB0IFG, so no USCI_I2C_ISR can run against the
+          //abandoned transfer once interrupts are back on.
+          I2C_abortTransfer();
+          __bis_SR_register(gie); //Restore original GIE state
+          __delay_cycles(240000); //10ms (assuming 24MHz clock)
+          I2C_Enable();
+          return 0;
+        }
         __bis_SR_register(gie); //Restore original GIE state
-        __delay_cycles(240000); //10ms (assuming 24MHz clock)
-        I2C_Enable();
         return 0;
       }
     }
@@ -556,7 +674,7 @@ uint8_t I2C_Write_Packet_To_Sensor(uint8_t *writeData, uint8_t dataLength)
  **/
 uint8_t I2C_Read_Packet_From_Sensor(uint8_t *readData, uint16_t dataLength)
 {
-  uint16_t start, now;
+  uint16_t start, now, deadline;
   uint16_t gie = __get_SR_register() & GIE; //Store current GIE state
 
   //Assign values to local variables
@@ -586,19 +704,23 @@ uint8_t I2C_Read_Packet_From_Sensor(uint8_t *readData, uint16_t dataLength)
     __disable_interrupt();
     if (receive_flag)
     {
-      //only check for timeout if still waiting to transmit
+      //only check for timeout if still waiting to receive
       now = GetTB0();
-      if (((!((start + i2c_timeout) < start)) && (now >= (start + i2c_timeout)))
-          || (((start + i2c_timeout) < start) && (now < start)
-              && (now >= (start + i2c_timeout))))
-      { //needed to handle timer overflow
-        //timeout. Reset the USCI before restoring GIE: in I2C mode UCSWRST
-        //also clears UCB0IE and UCB0IFG, so no USCI_I2C_ISR can run against
-        //the abandoned transfer once interrupts are back on.
-        I2C_abortTransfer();
+      deadline = start + i2c_timeout;
+      if (I2C_TIMED_OUT(start, now, deadline))
+      {
+        if (!I2C_failedTransferLeftBusFree())
+        {
+          //Reset the USCI before restoring GIE: in I2C mode UCSWRST also
+          //clears UCB0IE and UCB0IFG, so no USCI_I2C_ISR can run against the
+          //abandoned transfer once interrupts are back on.
+          I2C_abortTransfer();
+          __bis_SR_register(gie); //Restore original GIE state
+          __delay_cycles(240000); //10ms (assuming 24MHz clock)
+          I2C_Enable();
+          return 0;
+        }
         __bis_SR_register(gie); //Restore original GIE state
-        __delay_cycles(240000); //10ms (assuming 24MHz clock)
-        I2C_Enable();
         return 0;
       }
     }
@@ -653,10 +775,14 @@ __interrupt void USCI_I2C_ISR(void)
     case 0:
       break; //Vector  0: No interrupts
     case 2:
-      break;               //Vector  2: ALIFG
-    case 4:                //Vector  4: NACKIFG
-      UCB0CTL1 |= UCTXSTT; //Re-start condition
-      tx_byte_ctr = 0;
+      break; //Vector  2: ALIFG
+    case 4:  //Vector  4: NACKIFG
+      //Nothing acknowledged the address or a byte: end the transfer with a
+      //STOP and fail it. Re-STARTing instead repeated the NACK until the
+      //wait's timeout reset the USCI mid-transfer, which can leave a slave
+      //holding SDA low.
+      UCB0CTL1 |= UCTXSTP;
+      I2C_isrEndTransfer();
       break;
     case 6:
       break; //Vector  6: STTIFG
@@ -687,8 +813,13 @@ __interrupt void USCI_I2C_ISR(void)
       {
         if (tx_byte_ctr == 0)
         {
-          while (UCB0CTL1 & UCTXSTP)
-            ;                         //Ensure stop condition got sent
+          //Ensure stop condition got sent. A held bus never lets it go, and
+          //the wait then resets the USCI and clears the bus.
+          if ((UCB0CTL1 & UCTXSTP) && !I2C_waitSent(UCTXSTP))
+          {
+            I2C_isrEndTransfer();
+            break;
+          }
           UCB0CTL1 |= UCTR + UCTXSTT; //Send I2C start condition
           tx_byte_ctr++;
         }
@@ -710,8 +841,15 @@ __interrupt void USCI_I2C_ISR(void)
       {
         if (tx_byte_ctr == 0)
         {
-          while (UCB0CTL1 & UCTXSTP)
-            ;                         //Ensure stop condition got sent
+          //Ensure stop condition got sent, bounded as above. The 2 cycles
+          //keep a read's START where it was: the unbounded poll reached it
+          //through one more jump (see I2C_TIMED_OUT for why that matters).
+          __delay_cycles(2);
+          if ((UCB0CTL1 & UCTXSTP) && !I2C_waitSent(UCTXSTP))
+          {
+            I2C_isrEndTransfer();
+            break;
+          }
           UCB0CTL1 |= UCTR + UCTXSTT; //I2C start condition
           tx_byte_ctr++;
         }
@@ -727,9 +865,12 @@ __interrupt void USCI_I2C_ISR(void)
           //In the case of reading one byte, poll on start condition bit
           if (rx_packet_length == 1)
           {
-            //Wait for start condition to be transmitted
-            while (UCB0CTL1 & UCTXSTT)
-              ;
+            //Wait for start condition to be transmitted, bounded as above
+            if (!I2C_waitSent(UCTXSTT))
+            {
+              I2C_isrEndTransfer();
+              break;
+            }
             UCB0CTL1 |= UCTXSTP; //Send I2C stop condition
           }
           I2C_Interrupt_Enable(UCB0RXIE);  //Enable RX interrupt

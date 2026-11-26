@@ -87,4 +87,13 @@ extern uint8_t I2C_Read_Packet_From_Sensor(uint8_t *readData, uint16_t dataLengt
 void i2cSlaveDiscover(void);
 char i2cSlavePresent(char address);
 
+//Set while a transfer waits for USCI_I2C_ISR to finish it
+extern volatile uint8_t transmit_flag;
+extern volatile uint8_t receive_flag;
+
+//Whether an I2C transfer is waiting to finish. Its wait sleeps in LPM0 and
+//tests its timeout only when an interrupt wakes it. A macro, because as an
+//inline function the compiler builds a 0/1 value before testing it.
+#define I2C_IS_TRANSFER_WAITING() (transmit_flag || receive_flag)
+
 #endif /*HAL_I2C_H*/
