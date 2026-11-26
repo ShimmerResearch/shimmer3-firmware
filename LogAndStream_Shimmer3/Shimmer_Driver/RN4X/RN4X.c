@@ -187,6 +187,30 @@ void BT_baudRateChange_cb(void (*cb)(void))
   baudRateChange_cb = cb;
 }
 
+/* Whether this start wakes the module through CTS before "$$$". Set by
+ * btInit() from BT_isRn41orRn42Expected() and used by initRN1() to initRN3()
+ * (DEV-1560). */
+static uint8_t ctsWakeAtStart;
+
+/* DEV-1560. Whether the module is expected to be an RN41 or RN42 before it
+ * has been asked for its version. That is the version read at boot if there
+ * has been one, otherwise the radio the EEPROM recorded at the last
+ * successful start (LogAndStream has written that record since v0.16.000).
+ * An EEPROM page of zeros would also read as an RN42, but an erased CAT24C16
+ * reads 0xFF. */
+uint8_t BT_isRn41orRn42Expected(void)
+{
+  gEepromSensorSettings *eepromSensorSettings;
+
+  if (!isBtDeviceUnknown())
+  {
+    return isBtDeviceRn41orRN42();
+  }
+  eepromSensorSettings = ShimEeprom_getSensorSettingsPage();
+  return (ShimEeprom_isPresent() && eepromSensorSettings != NULL
+      && (eepromSensorSettings->radioHwVer == RN42 || eepromSensorSettings->radioHwVer == RN41));
+}
+
 /* TODO create common boot sequence for both BT modules */
 void initRN1(void)
 {
@@ -200,6 +224,13 @@ void initRN1(void)
   //    // hold RN4678 in reset until fully configured
   //    setBtModuleReset(1);
   //}
+
+  /* Hold CTS low while the module boots, so that initRN2() makes a rising
+   * edge. A restart begins with CTS high from the BtStop() before it. */
+  if (ctsWakeAtStart)
+  {
+    setIsBtClearToSend(1);
+  }
 }
 
 void initRN2(void)
@@ -222,6 +253,16 @@ void initRN2(void)
 #endif
   setIsBtClearToSend(1);
   //setIsBtClearToSend(0);
+  /* For an RN41 or RN42: raise CTS to wake it from deep sleep, and lower it
+   * again 5 ms later in initRN3(), before "$$$" (Roving Networks
+   * RN-BT-DATA-UG v1.0r, section 3.1.3). An RN4678 is not raised here: with
+   * CTS high at this point its "%REBOOT%" status string arrived where "CMD"
+   * was expected, which is why the toggle was removed in October 2022
+   * (SHIM3-264). These are the existing timer steps, so nothing waits. */
+  if (ctsWakeAtStart)
+  {
+    setIsBtClearToSend(0);
+  }
   //}
   //else if (isBtDeviceRn4678())
   //{
@@ -237,6 +278,10 @@ void initRN2(void)
 
 void initRN3(void)
 {
+  if (ctsWakeAtStart)
+  {
+    setIsBtClearToSend(1);
+  }
   //if (isBtDeviceRn42())
   //{
   //    setIsBtClearToSend(1);
@@ -1494,15 +1539,20 @@ void btCmdModeStart(void)
  * 5 ms wakes it without losing data (Roving Networks RN-BT-DATA-UG v1.0r,
  * section 3.1.3). The firmware did this before every "$$$" until October 2022,
  * when it was dropped (SHIM3-264): CTS held high at that point let the
- * RN4678's "%REBOOT%" status string arrive where "CMD" was expected. So it is
- * done only here, for a "$$$" that has had no reply, and the receive is
- * restarted from an empty buffer before "$$$" is sent again.
+ * RN4678's "%REBOOT%" status string arrive where "CMD" was expected. It is now
+ * done before the first "$$$" only when an RN41 or RN42 is expected
+ * (initRN2()), and otherwise only here, for a "$$$" that has had no reply. The
+ * receive is restarted from an empty buffer before "$$$" is sent again.
  *
  * Call it at least 1 s after the unanswered "$$$": the RN42 does not enter
  * command mode if other bytes arrive within 1 s of "$$$". Returns 1 if "$$$"
  * was sent again. Returns 0 if no "$$$" is waiting for its reply, or if a
  * reply has just completed and its interrupt has yet to run: the caller can
- * try again once it has. */
+ * try again once it has.
+ *
+ * It busy-waits for 6 ms, so it belongs to the boot path, InitialiseBt(),
+ * which runs before sensing starts. Called from InitialiseBtAfterBoot(), or
+ * from anything SD sync reaches, it would stall the main loop while sensing. */
 uint8_t BT_retryCmdModeStartWithCtsWake(void)
 {
   uint16_t interruptState = __get_interrupt_state();
@@ -1725,6 +1775,7 @@ void BT_init(void)
 void btInit(void)
 {
   starting = 1;
+  ctsWakeAtStart = BT_isRn41orRn42Expected();
 
   //Turn on power (SW_BT P4.3 on SR30 and newer)
   setBtModulePower(1);

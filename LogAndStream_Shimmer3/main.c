@@ -269,7 +269,13 @@ void platform_sleepWhenNoTask(void)
  * module through CTS and sends it again (DEV-1560). At least 10, because the
  * RN42 ignores "$$$" if other bytes arrive within 1 s of it. A healthy module
  * replies within milliseconds. */
-#define BT_CMD_WAKE_RETRY_TICKS 15U
+#define BT_CMD_WAKE_RETRY_TICKS       15U
+
+/* Further attempts at 115200, before the rest of the baud ladder, when the
+ * module is expected to be an RN41 or RN42 (DEV-1560). Such a module starts
+ * at its stored rate, and the firmware leaves that at the 115200 default: it
+ * only ever sets a temporary rate, with "U,<rate>,N". */
+#define BT_RN4X_EXTRA_115200_ATTEMPTS 2U
 
 void InitialiseBt(void)
 {
@@ -314,6 +320,11 @@ void InitialiseBt(void)
    * whether the CTS wake retry has been made in this attempt (DEV-1560) */
   uint8_t cmdWaitTicks = 0U;
   uint8_t cmdWakeRetried = 0U;
+  /* Checked after BT_setGetVersion(), which has cleared the module version,
+   * so this comes from the radio the EEPROM recorded */
+  uint8_t extra115200Attempts
+      = BT_isRn41orRn42Expected() ? BT_RN4X_EXTRA_115200_ATTEMPTS : 0U;
+  uint8_t attemptsAllowed = sizeof(baudsTried) + extra115200Attempts;
 
   /* Try the inital baud rate first */
   baudsTried[initialBaudRate] = 1U;
@@ -322,7 +333,9 @@ void InitialiseBt(void)
   BtStart();
 
   /* Try the baud that's stored in the EEPROM firstly, if that fails try
-   * 115200, 1000000 or 460800 and then all other bauds. If they all fail, soft-reset */
+   * 115200, 1000000 or 460800 and then all other bauds. An expected RN41 or
+   * RN42 gets further attempts at 115200 before the others. If they all fail,
+   * stop in BOOT_STAGE_BLUETOOTH_FAILURE. */
   while (!shimmerStatus.btIsInitialised)
   {
     /* 100 ms, in 1 ms steps. Each module reply queues the next set-up step
@@ -349,7 +362,7 @@ void InitialiseBt(void)
     {
       failCount++;
 
-      if (failCount == sizeof(baudsTried))
+      if (failCount == attemptsAllowed)
       {
         //// software POR reset
         //platform_reset();
@@ -365,7 +378,12 @@ void InitialiseBt(void)
       _delay_cycles(12000000); //500ms
 
       /* Baud rate is likely 115200, 1000000 or 460800 so try them first */
-      if (baudsTried[BAUD_115200] != 1U)
+      if (extra115200Attempts && baudsTried[BAUD_115200])
+      {
+        extra115200Attempts--;
+        initialBaudRate = BAUD_115200;
+      }
+      else if (baudsTried[BAUD_115200] != 1U)
       {
         initialBaudRate = BAUD_115200;
       }
