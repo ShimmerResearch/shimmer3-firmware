@@ -92,6 +92,16 @@ void MPU9150_wake(uint8_t wakeup)
   I2C_Write_Packet_To_Sensor(buf, 2);
 }
 
+uint8_t MPU9150_isAwake(void)
+{
+  uint8_t buf;
+
+  I2C_Set_Slave_Address(MPU9150_ADDR);
+  buf = MPU9150_PWR_MGMT_1;
+  I2C_Read_Packet_From_Sensor(&buf, 1);
+  return (buf & 0x40) ? 0 : 1; //PWR_MGMT_1 bit 6: SLEEP
+}
+
 void MPU9150_getGyro(uint8_t *buf)
 {
   I2C_Set_Slave_Address(MPU9150_ADDR);
