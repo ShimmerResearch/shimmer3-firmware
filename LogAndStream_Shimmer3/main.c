@@ -794,6 +794,15 @@ __interrupt void TIMER0_B1_ISR(void)
         __bic_SR_register_on_exit(LPM3_bits);
       }
 
+      if (I2C_IS_TRANSFER_WAITING())
+      {
+        /* Wake the transfer's wait so it tests its timeout. While a task is
+         * executing nothing else may, because ShimTask_set() doesn't wake
+         * the CPU then, so a stalled transfer would wait for the next
+         * command. This bounds it at this 100 ms period plus the timeout. */
+        __bic_SR_register_on_exit(LPM3_bits);
+      }
+
       break;
     case 8:
       break; //TB0CCR4
