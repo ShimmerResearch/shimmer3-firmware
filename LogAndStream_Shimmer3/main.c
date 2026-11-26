@@ -783,6 +783,12 @@ __interrupt void TIMER0_B1_ISR(void)
         __bic_SR_register_on_exit(LPM3_bits);
       }
 
+      /* A module status string the module is no longer sending leaves the
+       * receive waiting for bytes that are not coming, and the device would
+       * ignore every later connection until reset. The drop re-arms the
+       * receive from here, so no wake is needed. */
+      ShimBt_rxDropStaleStatusString();
+
       if (!shimmerStatus.booting && checkIfBattReadNeeded())
       {
         __bic_SR_register_on_exit(LPM3_bits);
