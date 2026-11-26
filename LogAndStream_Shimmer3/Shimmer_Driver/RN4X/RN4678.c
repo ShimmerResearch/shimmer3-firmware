@@ -35,6 +35,19 @@ void RN4678_startOfNewStatusString(void)
   btStatusStrIndex = 1U;
 }
 
+/* Whether the status string holds s from index `from` */
+static uint8_t RN4678_statusStrHas(uint8_t from, const char *s)
+{
+  while (*s)
+  {
+    if (btStatusStr[from++] != *s++)
+    {
+      return 0U;
+    }
+  }
+  return 1U;
+}
+
 uint8_t RN4678_parseStatusString(uint8_t *waitingForArgs, uint8_t *btRxBuffPtr)
 {
   uint8_t numberOfCharRemaining = 0U;
@@ -440,8 +453,21 @@ uint8_t RN4678_parseStatusString(uint8_t *waitingForArgs, uint8_t *btRxBuffPtr)
             numberOfCharRemaining = BT_STAT_STR_LEN_RFCOMM_CLOSE - BT_STAT_STR_LEN_RFCOMM_OPEN;
           }
         }
-        /* "%RFCOMM_OPEN%" */
-        else if (btStatusStr[12U] == '%')
+        /* "%RFCOMMCLOSE%": "%RFCOMM_CLOSE%" that lost its '_' to a receive
+         * overrun. That byte is the first after the "%RFCOMM" read, the one an
+         * overrun takes: the module keeps sending until the receive is
+         * re-armed. The string is then as long as "%RFCOMM_OPEN%" and ends in
+         * '%' where that does, so it is tested for before it. */
+        else if (RN4678_statusStrHas(7U, "CLOSE%"))
+        {
+          ShimBt_handleBtRfCommStateChange(false);
+          bringUcOutOfSleep = 1U;
+        }
+        /* "%RFCOMM_OPEN%". The whole tail is matched, not just the closing
+         * '%': a close that lost more than one byte can put a '%' there too,
+         * and taking it for an open would leave the device connected to a
+         * host that has gone. */
+        else if (RN4678_statusStrHas(7U, "_OPEN%"))
         {
           ShimBt_handleBtRfCommStateChange(true);
           bringUcOutOfSleep = 1U;

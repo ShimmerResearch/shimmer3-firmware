@@ -733,6 +733,11 @@ __interrupt void TIMER0_B1_ISR(void)
       }
       break;
     case 6: //TB0CCR3
+    {
+      /* Long enough to make a receive DMA interrupt late: hold the radio
+       * off while it runs (BT_rxIsrHold) */
+      uint8_t btRxWasClearToSend = BT_rxIsrHold();
+
       if (!(WDTCTL & WDTHOLD))
       {
         //Reset Watchdog timer
@@ -794,7 +799,9 @@ __interrupt void TIMER0_B1_ISR(void)
         __bic_SR_register_on_exit(LPM3_bits);
       }
 
+      BT_rxIsrRelease(btRxWasClearToSend);
       break;
+    }
     case 8:
       break; //TB0CCR4
     case 10:
@@ -830,6 +837,10 @@ uint8_t checkIfBattReadNeeded(void)
 void BtStartDone()
 {
   shimmerStatus.btIsInitialised = 1;
+  /* Set-up is done, and its last step armed the receive. From here on CTS is
+   * asserted only with the DMA armed or its completion pending, which is what
+   * the release after a hold relies on (BT_rxIsrRelease) */
+  BT_setRxIsrHoldEnabled(areBtStatusStringsEnabled());
 }
 
 void BtStart(void)
@@ -862,6 +873,7 @@ void BtStop(uint8_t isCalledFromMain)
 
   if (shimmerStatus.btPowerOn)
   {
+    BT_setRxIsrHoldEnabled(0);
     DMA2_disable(); //dma2 for bt disabled
 
     updateBtConnectionStatusInterruptDirection();
@@ -985,6 +997,10 @@ uint16_t SampleTimerNextCompare(uint16_t compare)
 
 __interrupt void TIMER0_B0_ISR(void)
 {
+  /* This runs for tens of microseconds on every sample, and outranks the
+   * receive DMA's interrupt: hold the radio off while it runs
+   * (BT_rxIsrHold). With the hold off (RN42) this is one test and branch. */
+  uint8_t btRxWasClearToSend = BT_rxIsrHold();
   /* SampleTimerNextCompare(), inlined so the sample starts as soon after the
    * compare as before DEV-1222. The call put 34 cycles ahead of the trigger,
    * which cost the RN42 9.8% of its packets under 1024 Hz overload (DEV-1150
@@ -1003,6 +1019,8 @@ __interrupt void TIMER0_B0_ISR(void)
   {
     __bic_SR_register_on_exit(LPM3_bits);
   }
+
+  BT_rxIsrRelease(btRxWasClearToSend);
 }
 
 uint8_t platform_gatherData(void)

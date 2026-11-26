@@ -196,6 +196,10 @@ void Dma0ConversionStart(void)
 
 uint8_t Dma0ConversionDone(void)
 {
+  /* This shares the DMA vector with the Bluetooth receive and is served
+   * first: hold the radio off while it runs (BT_rxIsrHold) */
+  uint8_t btRxWasClearToSend = BT_rxIsrHold();
+
   if (battWait)
   {
     battWait = 0;
@@ -220,6 +224,8 @@ uint8_t Dma0ConversionDone(void)
     ShimTask_set(TASK_GATHER_DATA);
     ShimSens_adcCompleteCb();
   }
+
+  BT_rxIsrRelease(btRxWasClearToSend);
   return 1;
 }
 
