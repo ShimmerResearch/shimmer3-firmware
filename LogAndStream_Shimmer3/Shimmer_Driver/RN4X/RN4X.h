@@ -411,8 +411,9 @@ extern uint8_t btRxIsrHoldEnabled;
 
 /* BT_rxPause() and BT_rxResume() for an interrupt long enough to delay the
  * receive DMA's own (see btRxIsrHoldEnabled in RN4X.c). Hold first thing in
- * the handler and release last. Inline, because the sample timer's interrupt
- * is timing-sensitive: with the hold off this is one test and branch.
+ * the handler and release last, or hold just its long part, such as the I2C
+ * interrupt's poll. Inline, because the sample timer's interrupt is
+ * timing-sensitive: with the hold off this is one test and branch.
  *
  * The hold leaves the byte in flight to land in the DMA, or in UCA1RXBUF if a
  * transfer has just completed. The release asserts CTS again only if the DMA
