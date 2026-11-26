@@ -59,6 +59,49 @@ uint8_t RN4678_parseStatusString(uint8_t *waitingForArgs, uint8_t *btRxBuffPtr)
   memset(btRxBuffPtr, 0, *waitingForArgs);
   btStatusStrIndex += *waitingForArgs;
 
+  /* Re-synchronise on a '%' inside the first characters. No status string has
+   * a '%' among its first BT_STAT_STR_LEN_SMALLEST characters but the one it
+   * opens with (the shortest that close with one, "%BONDED%" and "%REBOOT%",
+   * are a character longer), so a '%' there is where the string really
+   * starts. The '%' this one opened with was then the
+   * closing '%' of a string the parser had lost its place in (a byte lost to
+   * an overrun, for one), read in command position. Read on as before, this
+   * phantom string would take the start of the real one, the real one's
+   * remaining letters would be parsed as commands, and its closing '%' would
+   * open the next phantom. Each connection's strings end the same way, so
+   * every later status string, the connect's "%RFCOMM_OPEN%" with them, and
+   * the host's commands would be lost across reconnects. Restart the string
+   * at the last such '%' and read what it still lacks for the checks below. */
+  if (btStatusStrIndex <= BT_STAT_STR_LEN_SMALLEST)
+  {
+    uint8_t i, start = 0U;
+
+    for (i = 1U; i < btStatusStrIndex; i++)
+    {
+      if (btStatusStr[i] == RN4678_STATUS_STRING_SEPARATOR)
+      {
+        start = i;
+      }
+    }
+    if (start)
+    {
+      uint8_t kept = btStatusStrIndex - start;
+
+      for (i = 0U; i < kept; i++)
+      {
+        btStatusStr[i] = btStatusStr[start + i];
+      }
+      for (; i < btStatusStrIndex; i++)
+      {
+        btStatusStr[i] = '\0';
+      }
+      btStatusStrIndex = kept;
+      *waitingForArgs = BT_STAT_STR_LEN_SMALLEST - kept;
+      setDmaWaitingForResponse(*waitingForArgs);
+      return 0U;
+    }
+  }
+
   enum BT_FIRMWARE_VERSION btFwVer = getBtFwVersion();
 
   uint8_t firstChar = btStatusStr[1U];
@@ -473,6 +516,20 @@ uint8_t RN4678_parseStatusString(uint8_t *waitingForArgs, uint8_t *btRxBuffPtr)
   }
   setDmaWaitingForResponse(numberOfCharRemaining);
   return bringUcOutOfSleep;
+}
+
+/* The status string being read, for log-and-stream-common's
+ * ShimBt_rxDropStaleStatusString(): its length so far, and dropping it so the
+ * next '%' starts a new one. */
+uint8_t RN4678_getStatusStrIndex(void)
+{
+  return btStatusStrIndex;
+}
+
+void RN4678_dropStatusString(void)
+{
+  RN4678_resetStatusString();
+  btStatusStrIndex = 0U;
 }
 
 uint8_t RN4678_isErrorLedsEnabled(void)

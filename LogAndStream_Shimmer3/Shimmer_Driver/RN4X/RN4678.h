@@ -14,6 +14,8 @@ void RN4678_driverInit(void);
 void RN4678_resetStatusString(void);
 void RN4678_startOfNewStatusString(void);
 uint8_t RN4678_parseStatusString(uint8_t *waitingForArgs, uint8_t *btRxBuffPtr);
+uint8_t RN4678_getStatusStrIndex(void);
+void RN4678_dropStatusString(void);
 uint8_t RN4678_isErrorLedsEnabled(void);
 void RN4678_setErrorLedsEnabled(uint8_t state);
 
