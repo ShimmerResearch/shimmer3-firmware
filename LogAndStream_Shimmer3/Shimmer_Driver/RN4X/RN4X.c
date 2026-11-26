@@ -2275,6 +2275,25 @@ void BT_rxResume(uint8_t wasClearToSend)
   }
 }
 
+/* Whether the long interrupts hold the radio off the UART while they run
+ * (BT_rxIsrHold() in RN4X.h). The receive DMA's interrupt deasserts CTS only
+ * once it runs, so the module keeps sending after a transfer completes, and an
+ * interrupt that runs first delays it. The sample timer's, with the ADC
+ * completion behind it, runs for tens of microseconds while sensing, and so
+ * does the I2C interrupt while it polls a START or STOP out (hal_I2C.c,
+ * I2C_waitSentRxHeld). At the RN4678's 1 Mbps a byte takes 10 us, so a status
+ * string arriving then loses bytes to UART overruns - "%RFCOMM_OPEN%" with
+ * them, and the connection it announces is not seen.
+ *
+ * Only while status strings are on (RN4678) and the module is set up. The RN42
+ * sends none, and set-up arms the receive its own way. */
+uint8_t btRxIsrHoldEnabled = 0U;
+
+void BT_setRxIsrHoldEnabled(uint8_t isEnabled)
+{
+  btRxIsrHoldEnabled = isEnabled;
+}
+
 //RADIO_RTS interrupt: RTS raises when BT has trans overflow
 void setBtRtsInterruptState(uint8_t isEnabled)
 {

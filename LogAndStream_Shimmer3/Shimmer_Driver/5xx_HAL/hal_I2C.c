@@ -44,6 +44,7 @@
 #include "hal_TB0.h"
 #include "msp430.h"
 
+#include "../RN4X/RN4X.h"
 #include "../shimmer_definitions.h"
 
 #define I2C_TIMEOUT \
@@ -262,6 +263,29 @@ static inline uint8_t I2C_waitSent(uint8_t bit)
     }
   }
   return 1;
+}
+
+/**
+ * @brief I2C_waitSent() with the Bluetooth module held off the UART.
+ *
+ * This interrupt outranks the Bluetooth receive DMA's, so while it polls, a
+ * receive transfer that completes waits for its service and the module's next
+ * bytes overrun UCA1RXBUF. A one-byte read's START goes out with its address
+ * byte, which takes longer than an RN4678 at 1 Mbps allows. BT_rxIsrHold()
+ * deasserts CTS for the poll (RN4X.h); with the hold off (RN42) it is a test
+ * and a branch. Only the poll is held: the transfer's other interrupts are
+ * short, and a STOP that has already gone costs nothing.
+ *
+ * @param bit UCTXSTT or UCTXSTP
+ * @return 1 once the bit has cleared, 0 if it was still set at the bound
+ */
+static inline uint8_t I2C_waitSentRxHeld(uint8_t bit)
+{
+  uint8_t btRxWasClearToSend = BT_rxIsrHold();
+  uint8_t sent = I2C_waitSent(bit);
+
+  BT_rxIsrRelease(btRxWasClearToSend);
+  return sent;
 }
 
 /**
@@ -815,7 +839,7 @@ __interrupt void USCI_I2C_ISR(void)
         {
           //Ensure stop condition got sent. A held bus never lets it go, and
           //the wait then resets the USCI and clears the bus.
-          if ((UCB0CTL1 & UCTXSTP) && !I2C_waitSent(UCTXSTP))
+          if ((UCB0CTL1 & UCTXSTP) && !I2C_waitSentRxHeld(UCTXSTP))
           {
             I2C_isrEndTransfer();
             break;
@@ -845,7 +869,7 @@ __interrupt void USCI_I2C_ISR(void)
           //keep a read's START where it was: the unbounded poll reached it
           //through one more jump (see I2C_TIMED_OUT for why that matters).
           __delay_cycles(2);
-          if ((UCB0CTL1 & UCTXSTP) && !I2C_waitSent(UCTXSTP))
+          if ((UCB0CTL1 & UCTXSTP) && !I2C_waitSentRxHeld(UCTXSTP))
           {
             I2C_isrEndTransfer();
             break;
@@ -866,7 +890,7 @@ __interrupt void USCI_I2C_ISR(void)
           if (rx_packet_length == 1)
           {
             //Wait for start condition to be transmitted, bounded as above
-            if (!I2C_waitSent(UCTXSTT))
+            if (!I2C_waitSentRxHeld(UCTXSTT))
             {
               I2C_isrEndTransfer();
               break;

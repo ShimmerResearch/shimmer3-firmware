@@ -3,6 +3,8 @@
 
 #include <stdint.h>
 
+#include "msp430.h"
+
 #include "log_and_stream_definitions.h"
 #include <Comms/shimmer_bt_uart.h>
 
@@ -403,6 +405,45 @@ void DMA2AndCtsDisable(void);
 void setIsBtClearToSend(uint8_t isBtClearToSend);
 uint8_t BT_rxPause(void);
 void BT_rxResume(uint8_t wasClearToSend);
+void BT_setRxIsrHoldEnabled(uint8_t isEnabled);
+
+extern uint8_t btRxIsrHoldEnabled;
+
+/* BT_rxPause() and BT_rxResume() for an interrupt long enough to delay the
+ * receive DMA's own (see btRxIsrHoldEnabled in RN4X.c). Hold first thing in
+ * the handler and release last, or hold just its long part, such as the I2C
+ * interrupt's poll. Inline, because the sample timer's interrupt is
+ * timing-sensitive: with the hold off this is one test and branch.
+ *
+ * The hold leaves the byte in flight to land in the DMA, or in UCA1RXBUF if a
+ * transfer has just completed. The release asserts CTS again only if the DMA
+ * is still armed; if a byte completed it meanwhile, its pending interrupt
+ * re-arms and asserts CTS, as it does outside a hold. Interrupts are disabled
+ * in a handler, so nothing re-asserts CTS in between. */
+static inline uint8_t BT_rxIsrHold(void)
+{
+#if BT_CTS_CONTROL_ENABLED
+  if (btRxIsrHoldEnabled && !(P2OUT & BIT2))
+  {
+    P2OUT |= BIT2;
+    return 1U;
+  }
+#endif
+  return 0U;
+}
+
+static inline void BT_rxIsrRelease(uint8_t wasClearToSend)
+{
+#if BT_CTS_CONTROL_ENABLED
+  if (wasClearToSend && (DMA2CTL & DMAEN))
+  {
+    P2OUT &= ~BIT2;
+  }
+#else
+  (void) wasClearToSend;
+#endif
+}
+
 void setBtRtsInterruptState(uint8_t isEnabled);
 void setBtConnectionStatusInterruptIsEnabled(uint8_t isEnabled);
 void updateBtConnectionStatusInterruptDirection(void);
