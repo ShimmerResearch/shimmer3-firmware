@@ -545,6 +545,19 @@ __interrupt void Port1_ISR(void)
         P1IES &= ~BIT3;     //look for rising edge
         BT_rtsInterrupt(0); //when 0, can call sendNextChar();
       }
+      /* RTS can change between the read above and the edge select, and an
+       * edge in that window sets no flag: writing P1IES only may set P1IFG
+       * (SLAU208, Digital I/O, "Interrupt Edge Select Registers"). A fall
+       * missed that way left the TX chain paused with RTS low until the
+       * module next raised and dropped it, and that rise then arrived as a
+       * second rise (see BT_rtsInterrupt). The edge select watches for a fall
+       * only while the pin is high, so if the two disagree now, the level
+       * changed after it was read: raise the flag, and this case runs again
+       * with the new level. */
+      if ((P1IN ^ P1IES) & BIT3)
+      {
+        P1IFG |= BIT3;
+      }
       break;
 
       //ExG chip2 data ready
