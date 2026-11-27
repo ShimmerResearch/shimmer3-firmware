@@ -112,6 +112,13 @@ void Board_init(void)
   P1DIR &= ~BIT0; //input
   //UART_RTS as input
   P1DIR &= ~BIT3; //input
+  /* Pulled down (DEV-1560). The module drives RTS both ways, so a working
+   * module still holds the line high to stop the MSP430 sending. One whose
+   * RTS does not reach this pin would otherwise leave it floating, and a
+   * floating input that reads high stops every byte at
+   * ShimBt_sendNextChar(), "$$$" included, so the radio never starts. */
+  P1OUT &= ~BIT3; //pull-down, not pull-up
+  P1REN |= BIT3;
   //UART_CTS
   P2OUT &= ~BIT2; //set low
   P2DIR |= BIT2;  //output
