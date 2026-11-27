@@ -2103,6 +2103,8 @@ void BT_receiveFunction(uint8_t (*receiveFuncPtr)(uint8_t data))
 
 void BT_rtsInterrupt(uint8_t value)
 {
+  uint8_t wasPaused = txOverflow;
+
   txOverflow = value;
 #if BT_FLUSH_TX_BUF_IF_RN4678_RTS_LOCK_DETECTED
   if (!txOverflow)
@@ -2117,8 +2119,18 @@ void BT_rtsInterrupt(uint8_t value)
      * UCA1TXBUF behind the one being shifted out. Left in progress, nothing
      * else starts a transfer, and the TX interrupt re-enabled below takes the
      * chain on once that byte has gone. Marked idle here, a pulse on RTS
-     * shorter than two characters let the resume write over that byte. */
-    txie_reg = UCA1IE & UCTXIE;
+     * shorter than two characters let the resume write over that byte.
+     *
+     * Save the TX interrupt's state only when this rise starts the pause. The
+     * port interrupt reads RTS's level, not the edge, so an RTS low pulse
+     * shorter than its latency arrives as a second rise. The TX interrupt is
+     * off by then, and saving that would leave it off at the fall, with the
+     * chain still marked in progress: every later reply would stop after the
+     * byte that starts it, until the MSP430 is reset. */
+    if (!wasPaused)
+    {
+      txie_reg = UCA1IE & UCTXIE;
+    }
     UCA1IE &= ~UCTXIE;
   }
   else
