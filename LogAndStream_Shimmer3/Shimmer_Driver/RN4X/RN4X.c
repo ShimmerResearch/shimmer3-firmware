@@ -2105,6 +2105,8 @@ void BT_rtsInterrupt(uint8_t value)
 {
   uint8_t wasPaused = txOverflow;
 
+  /* Time how long the module holds RTS (GET_BT_TX_COUNTERS_COMMAND) */
+  ShimBt_txCountRts(value);
   txOverflow = value;
 #if BT_FLUSH_TX_BUF_IF_RN4678_RTS_LOCK_DETECTED
   if (!txOverflow)
@@ -2557,9 +2559,14 @@ void calculateClassicBtTxSampleSetBufferSize(uint8_t len, uint16_t samplingRateT
     sampleSetsToBuffer = 2U;
   }
   /* Len + 1U for DATA_PACKET bytes header.
-   * *sampleSetsToBuffer for X number of sample sets in buffer */
-  /* Note: this doesn't include CRC bytes*/
-  rn4678ClassicBtSampleSetBufferSize = ((len + 1U) * sampleSetsToBuffer);
+   * *sampleSetsToBuffer for X number of sample sets in buffer.
+   * Plus the CRC bytes each packet carries: without them a CRC-on stream sent
+   * every packet on its own instead of in groups, and the module raised RTS
+   * many more times (dozens of short holds per 20 s at 256 Hz, against one
+   * or two with CRC off). The CRC mode is set before the stream starts, and
+   * this runs when sensing starts. */
+  rn4678ClassicBtSampleSetBufferSize
+      = ((len + 1U + ShimBt_getCrcMode()) * sampleSetsToBuffer);
 }
 
 uint8_t getDefaultBaudForBtVersion(void)
